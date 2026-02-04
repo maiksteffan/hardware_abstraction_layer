@@ -149,4 +149,78 @@ constexpr uint8_t COLOR_SHOW_R = 0;
 constexpr uint8_t COLOR_SHOW_G = 0;
 constexpr uint8_t COLOR_SHOW_B = 255;    // Blue
 
-// State: SUCCESS (correct a
+// State: SUCCESS (correct action)
+constexpr uint8_t COLOR_SUCCESS_R = 0;
+constexpr uint8_t COLOR_SUCCESS_G = 255;  // Green
+constexpr uint8_t COLOR_SUCCESS_B = 0;
+
+// State: BLINK (waiting for release)
+constexpr uint8_t COLOR_BLINK_R = 0;
+constexpr uint8_t COLOR_BLINK_G = 255;    // Green
+constexpr uint8_t COLOR_BLINK_B = 0;
+
+// State: FAIL (error indicator)
+constexpr uint8_t COLOR_FAIL_R = 255;     // Red
+constexpr uint8_t COLOR_FAIL_G = 0;
+constexpr uint8_t COLOR_FAIL_B = 0;
+
+// State: OFF
+constexpr uint8_t COLOR_OFF_R = 0;
+constexpr uint8_t COLOR_OFF_G = 0;
+constexpr uint8_t COLOR_OFF_B = 0;
+
+// ============================================================================
+// 9. I2C CONFIGURATION
+// ============================================================================
+
+constexpr uint32_t I2C_CLOCK_SPEED_HZ = 400000;  // 400kHz Fast Mode
+constexpr uint8_t I2C_RETRY_COUNT = 3;
+constexpr uint16_t I2C_RETRY_DELAY_US = 100;
+
+// ============================================================================
+// CAP1188 TOUCH SENSOR REGISTERS
+// ============================================================================
+
+constexpr uint8_t CAP1188_REG_MAIN_CONTROL = 0x00;
+constexpr uint8_t CAP1188_REG_SENSOR_INPUT_STATUS = 0x03;
+constexpr uint8_t CAP1188_REG_SENSOR_INPUT_DELTA_1 = 0x10;
+constexpr uint8_t CAP1188_REG_SENSITIVITY_CONTROL = 0x1F;
+constexpr uint8_t CAP1188_REG_CONFIG1 = 0x20;
+constexpr uint8_t CAP1188_REG_SENSOR_INPUT_ENABLE = 0x21;
+constexpr uint8_t CAP1188_REG_AVERAGING_SAMPLING = 0x24;
+constexpr uint8_t CAP1188_REG_CALIBRATION_ACTIVE = 0x26;
+constexpr uint8_t CAP1188_REG_INTERRUPT_ENABLE = 0x27;
+constexpr uint8_t CAP1188_REG_REPEAT_ENABLE = 0x28;
+constexpr uint8_t CAP1188_REG_MULTIPLE_TOUCH_CONFIG = 0x2A;
+constexpr uint8_t CAP1188_REG_SENSOR_THRESHOLD_1 = 0x30;
+constexpr uint8_t CAP1188_REG_STANDBY_CONFIG = 0x41;
+constexpr uint8_t CAP1188_REG_LED_LINK = 0x72;
+constexpr uint8_t CAP1188_REG_PRODUCT_ID = 0xFD;
+constexpr uint8_t CAP1188_REG_MANUFACTURER_ID = 0xFE;
+constexpr uint8_t CAP1188_REG_REVISION = 0xFF;
+
+// CAP1188 default values
+constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
+constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 0;
+constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
+constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
+
+// ============================================================================
+// 10. SENSOR I2C ADDRESSES (A-Y mapping)
+// ============================================================================
+
+constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
+    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E
+    0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
+    0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O
+    0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // P-T
+    0x2C, 0x3D, 0x08, 0x09, 0x0A   // U-Y
+};
+
+// ============================================================================
+// 11. PROTOCOL CONSTANTS
+// ============================================================================
+
+constexpr uint32_t COMMAND_ID_NONE = 0xFFFFFFFF;
+
+#endif // CONFIG_H
