@@ -325,3 +325,9 @@ void TouchController::processDebounce() {
                                 m_expectUp[i].commandId = NO_COMMAND_ID;
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}

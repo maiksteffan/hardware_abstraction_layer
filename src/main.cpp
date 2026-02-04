@@ -90,3 +90,13 @@ void loop() {
     
     // 3. Tick command executor (long-running commands)
     commandController.tick();
+    
+    // 4. Tick touch controller (poll sensors, debounce, emit events)
+    touchController.tick();
+    
+    // 5. Tick LED controller (animations)
+    ledController.tick();
+    
+    // 6. Flush pending events to serial
+    eventQueue.flush(3);
+}
