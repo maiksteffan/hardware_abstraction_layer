@@ -10,6 +10,10 @@
  *   - CPU: Dual-core Xtensa LX6 @ 240MHz
  *   - Flash: 4MB
  *   - SRAM: ~520KB
+ * 
+ * Architecture: Dual-core with FreeRTOS
+ *   - Core 0: Touch sensor I2C polling (dedicated task)
+ *   - Core 1: Serial, LED control, command processing (main loop + LED task)
  */
 
 #ifndef CONFIG_H
@@ -21,9 +25,24 @@
 // Firmware Information
 // ============================================================================
 
-#define FIRMWARE_VERSION "2.1.0-ESP32"
+#define FIRMWARE_VERSION "2.2.0-ESP32-RTOS"
 #define PROTOCOL_VERSION "2"
 #define BOARD_TYPE "ESP32_WROOM"
+
+// ============================================================================
+// ESP32 Dual-Core FreeRTOS Configuration
+// ============================================================================
+
+#define CORE_TOUCH_POLLING  0   // Core 0: Dedicated to I2C touch sensor polling
+#define CORE_MAIN           1   // Core 1: Serial, LED control, command processing
+
+// Task stack sizes (in bytes)
+constexpr uint32_t TASK_STACK_SIZE_TOUCH = 4096;
+constexpr uint32_t TASK_STACK_SIZE_LED   = 4096;
+
+// Task priorities (higher = more important)
+constexpr uint8_t TASK_PRIORITY_TOUCH = 2;  // High priority for responsive touch
+constexpr uint8_t TASK_PRIORITY_LED   = 1;  // Lower priority for LED animations
 
 // ============================================================================
 // Serial Protocol Configuration
@@ -32,12 +51,16 @@
 constexpr size_t MAX_LINE_LEN = 64;
 constexpr uint32_t SERIAL_BAUD_RATE = 115200;
 
+// ESP32 serial buffer sizes (larger for burst handling)
+constexpr size_t SERIAL_RX_BUFFER_SIZE = 256;
+constexpr size_t SERIAL_TX_BUFFER_SIZE = 256;
+
 // ============================================================================
 // Queue Sizes (ESP32 has ~520KB SRAM - can use larger queues)
 // ============================================================================
 
-constexpr uint8_t COMMAND_QUEUE_SIZE = 16;
-constexpr uint8_t EVENT_QUEUE_SIZE = 32;
+constexpr uint8_t COMMAND_QUEUE_SIZE = 32;
+constexpr uint8_t EVENT_QUEUE_SIZE = 64;
 
 // ============================================================================
 // Touch Sensing Configuration

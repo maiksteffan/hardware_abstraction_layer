@@ -374,7 +374,8 @@ void CommandController::executeCommand(const ParsedCommand& cmd) {
     
     if (actionIsLongRunning(cmd.action)) {
         if (!queueCommand(cmd)) {
-            m_eventQueue.queueError("busy", cmdId);
+            // Use BUSY response for flow control (allows Pi to retry)
+            m_eventQueue.queueBusy(cmdId);
             return;
         }
     } else {

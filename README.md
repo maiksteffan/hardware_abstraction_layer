@@ -244,29 +244,4 @@ send_cmd(f"HIDE {pos} #{cmd_id + 2}")  # Then hide
       │                                │
       │  Commands ────────────────►    │  LED Control
       │                                │  Touch Sensing
-      │  ◄──────────────── Responses   │
-      │  ◄──────────────── Events      │
-```
-
-The Arduino handles:
-- LED control (NeoPixel strips)
-- Touch sensor polling (25x CAP1188)
-- Debouncing
-- Animation timing
-
-The Raspberry Pi handles:
-- Game logic and sequences
-- User interface
-- Scoring
-- Timing validation
-
-## Hardware Reference
-
-- **Board**: Arduino UNO R4 WiFi
-- **LED Strips**: 2x 190 LEDs on pins D5, D10
-- **Touch Sensors**: 25x CAP1188 via I2C
-- **Positions**: A-Y mapped to specific LEDs and sensors
-
----
-
-*Protocol Version: 2.0 | Firmware Version: 2.0.0*
+      │  ◄
