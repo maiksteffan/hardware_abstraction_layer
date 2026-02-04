@@ -1,10 +1,9 @@
 /**
  * @file EventQueue.h
- * @brief Thread-safe outgoing event queue for serial communication
+ * @brief Thread-safe queue for outgoing serial events
  * 
- * Provides a non-blocking, thread-safe queue for outgoing serial messages.
- * Uses FreeRTOS mutex for cross-core synchronization (touch events from Core 0,
- * command responses from Core 1).
+ * Manages a queue of events to be sent to the Raspberry Pi.
+ * Thread-safe for cross-core access using FreeRTOS mutexes.
  */
 
 #ifndef EVENT_QUEUE_H
@@ -20,20 +19,20 @@
 // ============================================================================
 
 enum class EventType : uint8_t {
-    ACK,
-    DONE,
-    ERR,
-    BUSY,           // New: Flow control when command queue is full
-    TOUCHED,
-    TOUCH_RELEASED,
-    SCANNED,
-    RECALIBRATED,
-    INFO,
-    VALUE
+    ACK,            // Command acknowledged
+    DONE,           // Long-running command completed
+    ERR,            // Error occurred
+    BUSY,           // Queue full, retry later
+    TOUCHED,        // Touch detected
+    TOUCH_RELEASED, // Touch released
+    SCANNED,        // Sensor scan complete
+    RECALIBRATED,   // Sensor recalibrated
+    INFO,           // Firmware info
+    VALUE           // Sensor value response
 };
 
 // ============================================================================
-// Event Structure
+// Event Data Structure
 // ============================================================================
 
 struct Event {
@@ -46,7 +45,7 @@ struct Event {
 };
 
 // ============================================================================
-// EventQueue Class (Thread-Safe)
+// EventQueue Class
 // ============================================================================
 
 class EventQueue {
@@ -61,30 +60,29 @@ public:
     bool isEmpty() const;
     uint8_t count() const;
     
-    // Event emission methods (all thread-safe, can be called from any core)
-    bool queueAck(const char* action, char position = 0, uint32_t commandId = NO_COMMAND_ID);
-    bool queueDone(const char* action, char position = 0, uint32_t commandId = NO_COMMAND_ID);
-    bool queueError(const char* reason, uint32_t commandId = NO_COMMAND_ID);
-    bool queueBusy(uint32_t commandId = NO_COMMAND_ID);  // New: Flow control response
-    bool queueTouched(char position, uint32_t commandId = NO_COMMAND_ID);
-    bool queueTouchReleased(char position, uint32_t commandId = NO_COMMAND_ID);
-    bool queueScanned(const char* sensorList, uint32_t commandId = NO_COMMAND_ID);
-    bool queueRecalibrated(char position, uint32_t commandId = NO_COMMAND_ID);
-    bool queueInfo(uint32_t commandId = NO_COMMAND_ID);
-    bool queueValue(char position, int8_t value, uint32_t commandId = NO_COMMAND_ID);
+    // Queue event methods (thread-safe, callable from any core)
+    bool queueAck(const char* action, char position = 0, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueDone(const char* action, char position = 0, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueError(const char* reason, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueBusy(uint32_t commandId = COMMAND_ID_NONE);
+    bool queueTouched(char position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueTouchReleased(char position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueScanned(const char* sensorList, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueRecalibrated(char position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
+    bool queueValue(char position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
 
 private:
-    Event m_queue[EVENT_QUEUE_SIZE];
+    Event m_events[QUEUE_SIZE_EVENTS];
     uint8_t m_head;
     uint8_t m_tail;
-    volatile uint8_t m_count;  // volatile for cross-core visibility
+    volatile uint8_t m_count;
     
-    // FreeRTOS synchronization
-    SemaphoreHandle_t m_queueMutex;   // Protects queue operations
-    SemaphoreHandle_t m_serialMutex;  // Protects serial output
+    SemaphoreHandle_t m_queueMutex;
+    SemaphoreHandle_t m_serialMutex;
     
     bool enqueue(const Event& event);
-    void sendEventOptimized(const Event& event);  // Single-buffer serial output
+    void sendEvent(const Event& event);
 };
 
 #endif // EVENT_QUEUE_H

@@ -15,7 +15,7 @@ TouchController::TouchController()
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
 {
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         m_sensors[i].active = false;
         m_sensors[i].currentTouched = false;
         m_sensors[i].debouncedTouched = false;
@@ -23,9 +23,9 @@ TouchController::TouchController()
         m_sensors[i].lastChangeTime = 0;
         
         m_expectDown[i].active = false;
-        m_expectDown[i].commandId = NO_COMMAND_ID;
+        m_expectDown[i].commandId = COMMAND_ID_NONE;
         m_expectUp[i].active = false;
-        m_expectUp[i].commandId = NO_COMMAND_ID;
+        m_expectUp[i].commandId = COMMAND_ID_NONE;
     }
 }
 
@@ -39,13 +39,13 @@ void TouchController::setEventQueue(EventQueue* eventQueue) {
 
 bool TouchController::begin() {
     // ESP32: Initialize I2C with specific pins
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-    Wire.setClock(I2C_CLOCK_SPEED);
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    Wire.setClock(I2C_CLOCK_SPEED_HZ);
     delay(100);
     
     m_activeSensorCount = 0;
     
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         uint8_t address = SENSOR_I2C_ADDRESSES[i];
         
         if (initSensor(address)) {
@@ -79,15 +79,15 @@ void TouchController::tick() {
 }
 
 bool TouchController::recalibrate(uint8_t sensorIndex) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return false;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
     if (!m_sensors[sensorIndex].active) return false;
     
     uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
-    return writeRegister(address, CAP1188_REG_CALIBRATION_ACTIVE, CS1_BIT_MASK);
+    return writeRegister(address, CAP1188_REG_CALIBRATION_ACTIVE, CAP1188_CS1_BIT_MASK);
 }
 
 void TouchController::recalibrateAll() {
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         if (m_sensors[i].active) {
             recalibrate(i);
         }
@@ -95,7 +95,7 @@ void TouchController::recalibrateAll() {
 }
 
 bool TouchController::setSensitivity(uint8_t sensorIndex, uint8_t level) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return false;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
     if (!m_sensors[sensorIndex].active) return false;
     if (level > 7) return false;
     
@@ -115,27 +115,27 @@ bool TouchController::setSensitivity(uint8_t sensorIndex, uint8_t level) {
 }
 
 void TouchController::setExpectDown(uint8_t sensorIndex, uint32_t commandId) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectDown[sensorIndex].active = true;
     m_expectDown[sensorIndex].commandId = commandId;
 }
 
 void TouchController::setExpectUp(uint8_t sensorIndex, uint32_t commandId) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectUp[sensorIndex].active = true;
     m_expectUp[sensorIndex].commandId = commandId;
 }
 
 void TouchController::clearExpectDown(uint8_t sensorIndex) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectDown[sensorIndex].active = false;
-    m_expectDown[sensorIndex].commandId = NO_COMMAND_ID;
+    m_expectDown[sensorIndex].commandId = COMMAND_ID_NONE;
 }
 
 void TouchController::clearExpectUp(uint8_t sensorIndex) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectUp[sensorIndex].active = false;
-    m_expectUp[sensorIndex].commandId = NO_COMMAND_ID;
+    m_expectUp[sensorIndex].commandId = COMMAND_ID_NONE;
 }
 
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
@@ -145,7 +145,7 @@ void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) con
     size_t pos = 0;
     bool first = true;
     
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         if (m_sensors[i].active) {
             size_t needed = first ? 2 : 3;
             if (pos + needed > bufferSize) break;
@@ -159,12 +159,12 @@ void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) con
 }
 
 bool TouchController::isSensorActive(uint8_t sensorIndex) const {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return false;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
     return m_sensors[sensorIndex].active;
 }
 
 bool TouchController::isTouched(uint8_t sensorIndex) const {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return false;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
     return m_sensors[sensorIndex].debouncedTouched;
 }
 
@@ -173,7 +173,7 @@ uint8_t TouchController::getActiveSensorCount() const {
 }
 
 bool TouchController::readSensorValue(uint8_t sensorIndex, int8_t& value) {
-    if (sensorIndex >= NUM_TOUCH_SENSORS) return false;
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
     if (!m_sensors[sensorIndex].active) return false;
     
     uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
@@ -199,7 +199,7 @@ uint8_t TouchController::letterToIndex(char letter) {
 }
 
 char TouchController::indexToLetter(uint8_t index) {
-    if (index < NUM_TOUCH_SENSORS) return 'A' + index;
+    if (index < TOUCH_SENSOR_COUNT) return 'A' + index;
     return '?';
 }
 
@@ -225,7 +225,7 @@ bool TouchController::initSensor(uint8_t address) {
     if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) return false;
     
     // Enable only CS1 input
-    if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, CS1_BIT_MASK)) return false;
+    if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, CAP1188_CS1_BIT_MASK)) return false;
     
     return true;
 }
@@ -256,7 +256,7 @@ int8_t TouchController::readRawTouch(uint8_t address) {
         return -1;  // I2C error - return error state, not "not touched"
     }
     
-    bool touched = (status & CS1_BIT_MASK) != 0;
+    bool touched = (status & CAP1188_CS1_BIT_MASK) != 0;
     
     if (touched) {
         uint8_t mainControl;
@@ -271,7 +271,7 @@ int8_t TouchController::readRawTouch(uint8_t address) {
 void TouchController::pollSensors() {
     uint32_t now = millis();
     
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         if (!m_sensors[i].active) continue;
         
         uint8_t address = SENSOR_I2C_ADDRESSES[i];
@@ -291,7 +291,7 @@ void TouchController::pollSensors() {
 void TouchController::processDebounce() {
     uint32_t now = millis();
     
-    for (uint8_t i = 0; i < NUM_TOUCH_SENSORS; i++) {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         if (!m_sensors[i].active) continue;
         
         TouchSensorState& sensor = m_sensors[i];
@@ -301,7 +301,7 @@ void TouchController::processDebounce() {
             uint32_t elapsed = now - sensor.lastChangeTime;
             
             // Use different debounce times: shorter for touch, longer for release
-            uint16_t requiredDebounce = sensor.currentTouched ? DEBOUNCE_TOUCH_MS : DEBOUNCE_RELEASE_MS;
+            uint16_t requiredDebounce = sensor.currentTouched ? TOUCH_DEBOUNCE_PRESS_MS : TOUCH_DEBOUNCE_RELEASE_MS;
             
             if (elapsed >= requiredDebounce) {
                 sensor.debouncedTouched = sensor.currentTouched;
@@ -316,12 +316,18 @@ void TouchController::processDebounce() {
                             if (m_expectDown[i].active) {
                                 m_eventQueue->queueTouched(letter, m_expectDown[i].commandId);
                                 m_expectDown[i].active = false;
-                                m_expectDown[i].commandId = NO_COMMAND_ID;
+                                m_expectDown[i].commandId = COMMAND_ID_NONE;
                             }
                         } else {
                             if (m_expectUp[i].active) {
                                 m_eventQueue->queueTouchReleased(letter, m_expectUp[i].commandId);
                                 m_expectUp[i].active = false;
-                                m_expectUp[i].commandId = NO_COMMAND_ID;
+                                m_expectUp[i].commandId = COMMAND_ID_NONE;
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}

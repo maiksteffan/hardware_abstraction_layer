@@ -120,18 +120,18 @@ private:
     EventQueue& m_eventQueue;
     
     // Ring buffer for incoming serial data
-    char m_rxBuffer[MAX_LINE_LEN * 2];
+    char m_rxBuffer[SERIAL_LINE_MAX_LENGTH * 2];
     uint8_t m_rxHead;
     uint8_t m_rxTail;
     uint32_t m_lastRxTime;
     
     // Line buffer for parsing
-    char m_lineBuffer[MAX_LINE_LEN];
+    char m_lineBuffer[SERIAL_LINE_MAX_LENGTH];
     uint8_t m_lineIndex;
     bool m_lineOverflow;
     
     // Command queue
-    QueuedCommand m_commandQueue[COMMAND_QUEUE_SIZE];
+    QueuedCommand m_commandQueue[QUEUE_SIZE_COMMANDS];
     
     // Parsing methods
     bool extractLine();

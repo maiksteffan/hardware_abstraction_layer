@@ -84,7 +84,7 @@ public:
 private:
     Adafruit_NeoPixel m_strip1;
     Adafruit_NeoPixel m_strip2;
-    PositionData m_positions[NUM_POSITIONS];
+    PositionData m_positions[LED_POSITION_COUNT];
     
     bool m_sequenceAnimActive;
     uint8_t m_sequenceAnimStep;

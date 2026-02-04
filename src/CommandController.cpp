@@ -30,7 +30,7 @@ CommandController::CommandController(LedController& ledController,
     memset(m_rxBuffer, 0, sizeof(m_rxBuffer));
     memset(m_lineBuffer, 0, sizeof(m_lineBuffer));
     
-    for (uint8_t i = 0; i < COMMAND_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         m_commandQueue[i].active = false;
     }
 }
@@ -46,7 +46,7 @@ void CommandController::begin() {
     m_lineIndex = 0;
     m_lineOverflow = false;
     
-    for (uint8_t i = 0; i < COMMAND_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         m_commandQueue[i].active = false;
     }
 }
@@ -78,7 +78,7 @@ void CommandController::processCompletedLines() {
 
 void CommandController::tick() {
     // Tick all active queued commands
-    for (uint8_t i = 0; i < COMMAND_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         if (m_commandQueue[i].active) {
             tickCommand(m_commandQueue[i]);
         }
@@ -86,7 +86,7 @@ void CommandController::tick() {
 }
 
 bool CommandController::isQueueFull() const {
-    for (uint8_t i = 0; i < COMMAND_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         if (!m_commandQueue[i].active) {
             return false;
         }
@@ -117,7 +117,7 @@ bool CommandController::extractLine() {
             continue;
         }
         
-        if (m_lineIndex < MAX_LINE_LEN - 1) {
+        if (m_lineIndex < SERIAL_LINE_MAX_LENGTH - 1) {
             m_lineBuffer[m_lineIndex++] = c;
         } else {
             m_lineOverflow = true;
@@ -146,7 +146,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.position = 0;
     cmd.positionIndex = 255;
     cmd.hasId = false;
-    cmd.id = NO_COMMAND_ID;
+    cmd.id = COMMAND_ID_NONE;
     cmd.extraValue = 0;
     cmd.r = 0;
     cmd.g = 0;
@@ -164,7 +164,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     
     cmd.action = parseAction(actionStart, actionLen);
     if (cmd.action == CommandAction::INVALID) {
-        m_eventQueue.queueError("unknown_action", NO_COMMAND_ID);
+        m_eventQueue.queueError("unknown_action", COMMAND_ID_NONE);
         return false;
     }
     
@@ -178,10 +178,10 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             val = val * 10 + (*p - '0');
             p++;
         }
-        if (val > 255) { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         cmd.r = (uint8_t)val;
         
-        if (*p != ',') { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (*p != ',') { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         p++;
         
         // Parse G value
@@ -190,10 +190,10 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             val = val * 10 + (*p - '0');
             p++;
         }
-        if (val > 255) { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         cmd.g = (uint8_t)val;
         
-        if (*p != ',') { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (*p != ',') { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         p++;
         
         // Parse B value
@@ -202,7 +202,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             val = val * 10 + (*p - '0');
             p++;
         }
-        if (val > 255) { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         cmd.b = (uint8_t)val;
         
         p = skipWhitespace(p);
@@ -213,7 +213,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             val = val * 10 + (*p - '0');
             p++;
         }
-        if (val > 255) { m_eventQueue.queueError("bad_format", NO_COMMAND_ID); return false; }
+        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
         cmd.range = (uint8_t)val;
         
         p = skipWhitespace(p);
@@ -224,7 +224,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     // Parse position (if applicable)
     if (actionRequiresPosition(cmd.action)) {
         if (*p == '\0' || *p == '#') {
-            m_eventQueue.queueError("bad_format", NO_COMMAND_ID);
+            m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
             return false;
         }
         
@@ -232,7 +232,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         cmd.positionIndex = charToIndex(cmd.position);
         
         if (cmd.positionIndex == 255) {
-            m_eventQueue.queueError("unknown_position", NO_COMMAND_ID);
+            m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
             return false;
         }
         
@@ -243,7 +243,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     // Parse extra numeric value if needed (e.g., sensitivity level)
     if (cmd.action == CommandAction::SET_SENSITIVITY) {
         if (*p == '\0' || *p == '#') {
-            m_eventQueue.queueError("bad_format", NO_COMMAND_ID);
+            m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
             return false;
         }
         
@@ -254,7 +254,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         }
         
         if (val > 7) {
-            m_eventQueue.queueError("invalid_level", NO_COMMAND_ID);
+            m_eventQueue.queueError("invalid_level", COMMAND_ID_NONE);
             return false;
         }
         
@@ -370,7 +370,7 @@ bool CommandController::actionIsLongRunning(CommandAction action) {
 void CommandController::executeCommand(const ParsedCommand& cmd) {
     if (!cmd.valid) return;
     
-    uint32_t cmdId = cmd.hasId ? cmd.id : NO_COMMAND_ID;
+    uint32_t cmdId = cmd.hasId ? cmd.id : COMMAND_ID_NONE;
     
     if (actionIsLongRunning(cmd.action)) {
         if (!queueCommand(cmd)) {
@@ -384,7 +384,7 @@ void CommandController::executeCommand(const ParsedCommand& cmd) {
 }
 
 void CommandController::executeInstant(const ParsedCommand& cmd) {
-    uint32_t cmdId = cmd.hasId ? cmd.id : NO_COMMAND_ID;
+    uint32_t cmdId = cmd.hasId ? cmd.id : COMMAND_ID_NONE;
     const char* actionStr = actionToString(cmd.action);
     
     switch (cmd.action) {
@@ -541,7 +541,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
 
 bool CommandController::queueCommand(const ParsedCommand& cmd) {
     // Find an empty slot
-    for (uint8_t i = 0; i < COMMAND_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         if (!m_commandQueue[i].active) {
             m_commandQueue[i].command = cmd;
             m_commandQueue[i].active = true;
@@ -549,7 +549,7 @@ bool CommandController::queueCommand(const ParsedCommand& cmd) {
             m_commandQueue[i].state = 0;
             
             // Send ACK immediately
-            uint32_t cmdId = cmd.hasId ? cmd.id : NO_COMMAND_ID;
+            uint32_t cmdId = cmd.hasId ? cmd.id : COMMAND_ID_NONE;
             m_eventQueue.queueAck(actionToString(cmd.action), cmd.position, cmdId);
             
             // Start the action
@@ -572,7 +572,7 @@ bool CommandController::queueCommand(const ParsedCommand& cmd) {
 void CommandController::tickCommand(QueuedCommand& qc) {
     if (!qc.active) return;
     
-    uint32_t cmdId = qc.command.hasId ? qc.command.id : NO_COMMAND_ID;
+    uint32_t cmdId = qc.command.hasId ? qc.command.id : COMMAND_ID_NONE;
     
     switch (qc.command.action) {
         case CommandAction::SUCCESS:

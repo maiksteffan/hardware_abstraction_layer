@@ -1,19 +1,21 @@
 /**
  * @file Config.h
- * @brief Configuration constants for the LED/Touch controller firmware
+ * @brief Central configuration for LED/Touch controller firmware
  * 
- * Protocol version 2.0 - Event-driven architecture
- * ESP32 WROOM acts as "dumb" hardware executor + event source
- * All game logic resides on Raspberry Pi
+ * This file contains ALL configurable values for the firmware.
+ * Modify values here to customize behavior without changing code.
  * 
- * Target: Freenove ESP32 WROOM
- *   - CPU: Dual-core Xtensa LX6 @ 240MHz
- *   - Flash: 4MB
- *   - SRAM: ~520KB
- * 
- * Architecture: Dual-core with FreeRTOS
- *   - Core 0: Touch sensor I2C polling (dedicated task)
- *   - Core 1: Serial, LED control, command processing (main loop + LED task)
+ * Sections:
+ *   1. Firmware Metadata
+ *   2. Hardware Pins
+ *   3. FreeRTOS Tasks
+ *   4. Serial Communication
+ *   5. Queues & Buffers
+ *   6. Touch Sensing
+ *   7. LED Control
+ *   8. Colors
+ *   9. I2C Configuration
+ *   10. Sensor Addresses
  */
 
 #ifndef CONFIG_H
@@ -22,174 +24,129 @@
 #include <Arduino.h>
 
 // ============================================================================
-// Firmware Information
+// 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "2.2.0-ESP32-RTOS"
+#define FIRMWARE_VERSION "2.3.0"
 #define PROTOCOL_VERSION "2"
 #define BOARD_TYPE "ESP32_WROOM"
 
 // ============================================================================
-// ESP32 Dual-Core FreeRTOS Configuration
+// 2. HARDWARE PINS (ESP32 WROOM GPIO)
+// ============================================================================
+// Safe GPIO pins for ESP32:
+// - Avoid GPIO 0, 2 (boot strapping)
+// - Avoid GPIO 6-11 (flash)
+// - Avoid GPIO 34-39 (input only)
 // ============================================================================
 
-#define CORE_TOUCH_POLLING  0   // Core 0: Dedicated to I2C touch sensor polling
-#define CORE_MAIN           1   // Core 1: Serial, LED control, command processing
+// LED Strip Data Pins
+constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
+constexpr uint8_t PIN_LED_STRIP_2 = 19;  // GPIO19 - VSPI MISO
 
-// Task stack sizes (in bytes)
-constexpr uint32_t TASK_STACK_SIZE_TOUCH = 4096;
-constexpr uint32_t TASK_STACK_SIZE_LED   = 4096;
+// I2C Pins
+constexpr uint8_t PIN_I2C_SDA = 21;  // Default ESP32 SDA
+constexpr uint8_t PIN_I2C_SCL = 22;  // Default ESP32 SCL
+
+// ============================================================================
+// 3. FREERTOS TASK CONFIGURATION
+// ============================================================================
+
+// Core assignments
+constexpr uint8_t CORE_TOUCH_SENSOR = 0;  // Core 0: I2C touch polling
+constexpr uint8_t CORE_MAIN_LOOP    = 1;  // Core 1: Serial, LED, commands
+
+// Task stack sizes (bytes)
+constexpr uint32_t STACK_SIZE_TOUCH_TASK = 4096;
+constexpr uint32_t STACK_SIZE_LED_TASK   = 4096;
 
 // Task priorities (higher = more important)
-constexpr uint8_t TASK_PRIORITY_TOUCH = 2;  // High priority for responsive touch
-constexpr uint8_t TASK_PRIORITY_LED   = 1;  // Lower priority for LED animations
+constexpr uint8_t PRIORITY_TOUCH_TASK = 2;
+constexpr uint8_t PRIORITY_LED_TASK   = 1;
 
 // ============================================================================
-// Serial Protocol Configuration
+// 4. SERIAL COMMUNICATION
 // ============================================================================
 
-constexpr size_t MAX_LINE_LEN = 64;
 constexpr uint32_t SERIAL_BAUD_RATE = 115200;
-
-// ESP32 serial buffer sizes (larger for burst handling)
 constexpr size_t SERIAL_RX_BUFFER_SIZE = 256;
 constexpr size_t SERIAL_TX_BUFFER_SIZE = 256;
+constexpr size_t SERIAL_LINE_MAX_LENGTH = 64;
+constexpr uint16_t SERIAL_STARTUP_WAIT_MS = 3000;  // Max wait for serial ready
+constexpr uint16_t SERIAL_LINE_TIMEOUT_MS = 50;    // Timeout to complete partial line
 
 // ============================================================================
-// Queue Sizes (ESP32 has ~520KB SRAM - can use larger queues)
+// 5. QUEUES & BUFFERS
 // ============================================================================
 
-constexpr uint8_t COMMAND_QUEUE_SIZE = 32;
-constexpr uint8_t EVENT_QUEUE_SIZE = 64;
+// Queue capacities
+constexpr uint8_t QUEUE_SIZE_COMMANDS = 32;
+constexpr uint8_t QUEUE_SIZE_EVENTS   = 64;
+
+// Flush settings
+constexpr uint8_t EVENTS_PER_FLUSH = 5;  // Max events to send per loop iteration
+
+// Serial output buffer
+constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 96;  // Max chars per event message
+
+// Sensor list buffer (for SCANNED response)
+constexpr size_t SENSOR_LIST_BUFFER_SIZE = 64;
+
+// Serial wait timeout (milliseconds)
+constexpr uint16_t SERIAL_WAIT_TIMEOUT_MS = 3000;
+
+// Mutex timeout values (milliseconds)
+constexpr uint16_t MUTEX_TIMEOUT_QUEUE_MS  = 10;
+constexpr uint16_t MUTEX_TIMEOUT_SERIAL_MS = 20;
+constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 
 // ============================================================================
-// Touch Sensing Configuration
+// 6. TOUCH SENSING
 // ============================================================================
 
+constexpr uint8_t TOUCH_SENSOR_COUNT = 25;  // Total sensors (A-Y)
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
-constexpr uint16_t DEBOUNCE_TOUCH_MS = 100;    // Time to confirm touch
-constexpr uint16_t DEBOUNCE_RELEASE_MS = 100; // Time to confirm release (longer = more stable)
-constexpr uint8_t NUM_TOUCH_SENSORS = 25;
+constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
+constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
+constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
 
 // ============================================================================
-// LED Configuration (ESP32 WROOM GPIO pins)
-// ============================================================================
-// Using GPIO pins that are safe for output on ESP32:
-// - Avoiding GPIO 0, 2 (boot strapping)
-// - Avoiding GPIO 6-11 (connected to flash)
-// - Avoiding GPIO 34-39 (input only)
-// 
-// GPIO 18 & 19: Safe output pins, VSPI pins (good for fast data)
+// 7. LED CONTROL
 // ============================================================================
 
-constexpr uint8_t NUM_POSITIONS = 25;
+// Strip configuration
+constexpr uint8_t LED_POSITION_COUNT = 25;  // Logical positions (A-Y)
 
-constexpr uint8_t STRIP1_PIN = 18;  // GPIO18 - VSPI CLK, good for data output
-constexpr uint8_t STRIP2_PIN = 19;  // GPIO19 - VSPI MISO, good for data output
-
-#ifndef NUM_LEDS_STRIP1
-#define NUM_LEDS_STRIP1 190
+#ifndef LED_STRIP_1_LENGTH
+#define LED_STRIP_1_LENGTH 190
 #endif
 
-#ifndef NUM_LEDS_STRIP2
-#define NUM_LEDS_STRIP2 190
+#ifndef LED_STRIP_2_LENGTH
+#define LED_STRIP_2_LENGTH 190
 #endif
 
-constexpr uint8_t LED_BRIGHTNESS = 128;
+constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 128;  // 0-255
 
-// Animation settings
-constexpr uint8_t SUCCESS_PULSE_COUNT = 2;
-constexpr uint16_t SUCCESS_PULSE_STEPS = 20;
-constexpr uint16_t ANIMATION_STEP_MS = 25;
-constexpr uint16_t BLINK_INTERVAL_MS = 150;
+// Animation timing (milliseconds)
+constexpr uint16_t LED_ANIMATION_STEP_MS = 25;
+constexpr uint16_t LED_BLINK_INTERVAL_MS = 150;
+constexpr uint16_t LED_SEQUENCE_STEP_MS = 10;
+constexpr uint16_t LED_MENU_CHANGE_STEP_MS = 1;
+
+// Animation parameters
+constexpr uint8_t LED_SUCCESS_EXPANSION_RADIUS = 5;
+constexpr uint8_t LED_SEQUENCE_PULSE_COUNT = 2;
+constexpr uint16_t LED_SEQUENCE_PULSE_STEPS = 20;
+constexpr uint8_t LED_SEQUENCE_MAX_BRIGHTNESS = 40;
 
 // ============================================================================
-// Colors (RGB format)
+// 8. COLORS (RGB format, 0-255 per channel)
 // ============================================================================
 
-// SHOW = Blue
+// State: SHOW (default active state)
 constexpr uint8_t COLOR_SHOW_R = 0;
 constexpr uint8_t COLOR_SHOW_G = 0;
-constexpr uint8_t COLOR_SHOW_B = 255;
+constexpr uint8_t COLOR_SHOW_B = 255;    // Blue
 
-// SUCCESS = Green
-constexpr uint8_t COLOR_SUCCESS_R = 0;
-constexpr uint8_t COLOR_SUCCESS_G = 255;
-constexpr uint8_t COLOR_SUCCESS_B = 0;
-
-// BLINK = Green (fast blink for "release me")
-constexpr uint8_t COLOR_BLINK_R = 0;
-constexpr uint8_t COLOR_BLINK_G = 255;
-constexpr uint8_t COLOR_BLINK_B = 0;
-
-// FAIL = Red
-constexpr uint8_t COLOR_FAIL_R = 255;
-constexpr uint8_t COLOR_FAIL_G = 0;
-constexpr uint8_t COLOR_FAIL_B = 0;
-
-// OFF = Black
-constexpr uint8_t COLOR_OFF_R = 0;
-constexpr uint8_t COLOR_OFF_G = 0;
-constexpr uint8_t COLOR_OFF_B = 0;
-
-// ============================================================================
-// I2C Configuration (ESP32 WROOM)
-// ============================================================================
-// ESP32 default I2C pins:
-//   SDA: GPIO 21
-//   SCL: GPIO 22
-// ESP32 supports I2C clock up to 1MHz (Fast Mode Plus)
-// ============================================================================
-
-constexpr uint8_t I2C_SDA_PIN = 21;  // ESP32 default SDA
-constexpr uint8_t I2C_SCL_PIN = 22;  // ESP32 default SCL
-constexpr uint32_t I2C_CLOCK_SPEED = 400000;  // 400kHz Fast Mode (ESP32 supports up to 1MHz)
-constexpr uint8_t I2C_MAX_RETRIES = 3;
-constexpr uint16_t I2C_RETRY_DELAY_US = 100;
-
-// CAP1188 Register addresses
-constexpr uint8_t CAP1188_REG_MAIN_CONTROL = 0x00;
-constexpr uint8_t CAP1188_REG_SENSOR_INPUT_STATUS = 0x03;
-constexpr uint8_t CAP1188_REG_SENSOR_INPUT_DELTA_1 = 0x10;  // Delta count for CS1
-constexpr uint8_t CAP1188_REG_SENSITIVITY_CONTROL = 0x1F;
-constexpr uint8_t CAP1188_REG_CONFIG1 = 0x20;
-constexpr uint8_t CAP1188_REG_SENSOR_INPUT_ENABLE = 0x21;
-constexpr uint8_t CAP1188_REG_AVERAGING_SAMPLING = 0x24;
-constexpr uint8_t CAP1188_REG_CALIBRATION_ACTIVE = 0x26;
-constexpr uint8_t CAP1188_REG_INTERRUPT_ENABLE = 0x27;
-constexpr uint8_t CAP1188_REG_REPEAT_ENABLE = 0x28;
-constexpr uint8_t CAP1188_REG_MULTIPLE_TOUCH_CONFIG = 0x2A;
-constexpr uint8_t CAP1188_REG_SENSOR_THRESHOLD_1 = 0x30;
-constexpr uint8_t CAP1188_REG_STANDBY_CONFIG = 0x41;
-constexpr uint8_t CAP1188_REG_LED_LINK = 0x72;
-constexpr uint8_t CAP1188_REG_PRODUCT_ID = 0xFD;
-constexpr uint8_t CAP1188_REG_MANUFACTURER_ID = 0xFE;
-constexpr uint8_t CAP1188_REG_REVISION = 0xFF;
-
-constexpr uint8_t CS1_BIT_MASK = 0x01;
-constexpr uint8_t DEFAULT_SENSITIVITY = 0;
-constexpr uint8_t DEFAULT_TOUCH_THRESHOLD = 0x10;
-constexpr uint8_t DEFAULT_AVG_SAMPLING = 0x25;
-
-constexpr uint16_t SENSOR_INIT_DELAY_MS = 500;
-constexpr uint16_t POST_INIT_RECAL_DELAY_MS = 1500;
-
-// ============================================================================
-// I2C Address Mapping for Sensors A-Y
-// ============================================================================
-
-constexpr uint8_t SENSOR_I2C_ADDRESSES[NUM_TOUCH_SENSORS] = {
-    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E
-    0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
-    0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O
-    0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // P-T
-    0x2C, 0x3D, 0x08, 0x09, 0x0A   // U-Y
-};
-
-// ============================================================================
-// Command IDs
-// ============================================================================
-
-constexpr uint32_t NO_COMMAND_ID = 0xFFFFFFFF;
-
-#endif // CONFIG_H
+// State: SUCCESS (correct a

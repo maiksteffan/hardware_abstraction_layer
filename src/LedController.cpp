@@ -1,6 +1,9 @@
 /**
  * @file LedController.cpp
- * @brief Implementation of the LED Controller for dual addressable LED strips
+ * @brief LED Controller for dual addressable LED strips
+ * 
+ * Manages 25 logical LED positions (A-Y) mapped to two physical strips.
+ * All configurable values are defined in Config.h.
  */
 
 #include "LedController.h"
@@ -8,8 +11,11 @@
 // ============================================================================
 // LED Position Mappings (A-Y mapped to physical LED indices)
 // ============================================================================
+// Each position maps to a strip (1 or 2) and an index on that strip.
+// Modify these values when the physical LED layout changes.
+// ============================================================================
 
-static const LedMapping LED_MAPPINGS[NUM_POSITIONS] = {
+static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
     { StripId::STRIP1, 153 },  // A
     { StripId::STRIP1, 165 },  // B
     { StripId::STRIP1, 177 },  // C
@@ -37,20 +43,13 @@ static const LedMapping LED_MAPPINGS[NUM_POSITIONS] = {
     { StripId::STRIP2, 34 }    // Y
 };
 
-// Animation constants
-static const uint8_t SUCCESS_EXPANSION_RADIUS = 5;
-static const uint8_t SEQ_PULSE_COUNT = 2;
-static const uint16_t SEQ_PULSE_STEPS = 20;
-static const uint16_t SEQ_STEP_DURATION_MS = 10;
-static const uint8_t SEQ_PULSE_MAX_BRIGHTNESS = 40;
-
 // ============================================================================
 // Constructor
 // ============================================================================
 
 LedController::LedController()
-    : m_strip1(NUM_LEDS_STRIP1, STRIP1_PIN, NEO_GRB + NEO_KHZ800)
-    , m_strip2(NUM_LEDS_STRIP2, STRIP2_PIN, NEO_GRB + NEO_KHZ800)
+    : m_strip1(LED_STRIP_1_LENGTH, PIN_LED_STRIP_1, NEO_GRB + NEO_KHZ800)
+    , m_strip2(LED_STRIP_2_LENGTH, PIN_LED_STRIP_2, NEO_GRB + NEO_KHZ800)
     , m_sequenceAnimActive(false)
     , m_sequenceAnimStep(0)
     , m_sequenceAnimLastTime(0)
@@ -72,14 +71,14 @@ LedController::LedController()
 void LedController::begin() {
     m_strip1.begin();
     m_strip2.begin();
-    m_strip1.setBrightness(LED_BRIGHTNESS);
-    m_strip2.setBrightness(LED_BRIGHTNESS);
+    m_strip1.setBrightness(LED_BRIGHTNESS_DEFAULT);
+    m_strip2.setBrightness(LED_BRIGHTNESS_DEFAULT);
     m_strip1.clear();
     m_strip2.clear();
     m_strip1.show();
     m_strip2.show();
     
-    for (uint8_t i = 0; i < NUM_POSITIONS; i++) {
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].lastAnimationTime = 0;
@@ -98,7 +97,7 @@ void LedController::tick() {
 
 void LedController::update(uint32_t nowMillis) {
     // Update animations
-    for (uint8_t i = 0; i < NUM_POSITIONS; i++) {
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
         if (m_positions[i].state == PositionState::ANIMATING) {
             updateAnimation(i, nowMillis);
         } else if (m_positions[i].state == PositionState::CONTRACTING) {
@@ -124,7 +123,7 @@ void LedController::update(uint32_t nowMillis) {
 }
 
 bool LedController::show(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -146,7 +145,7 @@ bool LedController::show(uint8_t position) {
 }
 
 bool LedController::hide(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -166,7 +165,7 @@ void LedController::hideAll() {
     m_strip1.clear();
     m_strip2.clear();
     
-    for (uint8_t i = 0; i < NUM_POSITIONS; i++) {
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
@@ -180,7 +179,7 @@ void LedController::hideAll() {
 }
 
 bool LedController::success(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -203,7 +202,7 @@ bool LedController::success(uint8_t position) {
 }
 
 bool LedController::fail(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -223,7 +222,7 @@ bool LedController::fail(uint8_t position) {
 }
 
 bool LedController::contract(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -233,7 +232,7 @@ bool LedController::contract(uint8_t position) {
         m_positions[position].state == PositionState::ANIMATING) {
         // Start from full expansion radius
         m_positions[position].state = PositionState::CONTRACTING;
-        m_positions[position].animationStep = SUCCESS_EXPANSION_RADIUS;
+        m_positions[position].animationStep = LED_SUCCESS_EXPANSION_RADIUS;
         m_positions[position].lastAnimationTime = millis();
     } else {
         // If not expanded, just ensure it's shown as a single green LED
@@ -246,7 +245,7 @@ bool LedController::contract(uint8_t position) {
 }
 
 bool LedController::blink(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -268,7 +267,7 @@ bool LedController::blink(uint8_t position) {
 }
 
 bool LedController::stopBlink(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     if (m_positions[position].state != PositionState::BLINKING) {
         return true;
@@ -288,7 +287,7 @@ bool LedController::stopBlink(uint8_t position) {
 }
 
 bool LedController::expandStep(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -298,7 +297,7 @@ bool LedController::expandStep(uint8_t position) {
     uint8_t newRadius = currentRadius + 1;
     
     // Limit expansion to reasonable bounds
-    if (newRadius > SUCCESS_EXPANSION_RADIUS) {
+    if (newRadius > LED_SUCCESS_EXPANSION_RADIUS) {
         return true;  // Already at max, but not an error
     }
     
@@ -319,7 +318,7 @@ bool LedController::expandStep(uint8_t position) {
 }
 
 bool LedController::contractStep(uint8_t position) {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -385,17 +384,17 @@ bool LedController::isMenuChangeAnimationComplete() const {
 }
 
 bool LedController::isAnimationComplete(uint8_t position) const {
-    if (position >= NUM_POSITIONS) return true;
+    if (position >= LED_POSITION_COUNT) return true;
     return m_positions[position].state != PositionState::ANIMATING;
 }
 
 bool LedController::isContractComplete(uint8_t position) const {
-    if (position >= NUM_POSITIONS) return true;
+    if (position >= LED_POSITION_COUNT) return true;
     return m_positions[position].state != PositionState::CONTRACTING;
 }
 
 bool LedController::isBlinking(uint8_t position) const {
-    if (position >= NUM_POSITIONS) return false;
+    if (position >= LED_POSITION_COUNT) return false;
     return m_positions[position].state == PositionState::BLINKING;
 }
 
@@ -406,7 +405,7 @@ uint8_t LedController::charToPosition(char c) {
 }
 
 char LedController::positionToChar(uint8_t pos) {
-    if (pos < NUM_POSITIONS) return 'A' + pos;
+    if (pos < LED_POSITION_COUNT) return 'A' + pos;
     return '?';
 }
 
@@ -415,7 +414,7 @@ char LedController::positionToChar(uint8_t pos) {
 // ============================================================================
 
 const LedMapping* LedController::getMapping(uint8_t position) const {
-    if (position >= NUM_POSITIONS) return nullptr;
+    if (position >= LED_POSITION_COUNT) return nullptr;
     return &LED_MAPPINGS[position];
 }
 
@@ -424,7 +423,7 @@ Adafruit_NeoPixel* LedController::getStrip(StripId strip) {
 }
 
 uint16_t LedController::getStripLength(StripId strip) const {
-    return (strip == StripId::STRIP1) ? NUM_LEDS_STRIP1 : NUM_LEDS_STRIP2;
+    return (strip == StripId::STRIP1) ? LED_STRIP_1_LENGTH : LED_STRIP_2_LENGTH;
 }
 
 void LedController::setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, uint8_t b) {
@@ -446,8 +445,8 @@ void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapp
     
     // Clear based on whichever is larger: the tracked expansion radius or the animation radius
     uint8_t clearRadius = m_positions[position].expansionRadius;
-    if (SUCCESS_EXPANSION_RADIUS > clearRadius) {
-        clearRadius = SUCCESS_EXPANSION_RADIUS;
+    if (LED_SUCCESS_EXPANSION_RADIUS > clearRadius) {
+        clearRadius = LED_SUCCESS_EXPANSION_RADIUS;
     }
     
     for (int16_t offset = -(int16_t)clearRadius; offset <= (int16_t)clearRadius; offset++) {
@@ -464,7 +463,7 @@ void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapp
 void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
     PositionData& data = m_positions[position];
     
-    if (nowMillis - data.lastAnimationTime < ANIMATION_STEP_MS) return;
+    if (nowMillis - data.lastAnimationTime < LED_ANIMATION_STEP_MS) return;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
@@ -472,8 +471,8 @@ void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
     data.animationStep++;
     data.lastAnimationTime = nowMillis;
     
-    if (data.animationStep >= SUCCESS_EXPANSION_RADIUS) {
-        data.animationStep = SUCCESS_EXPANSION_RADIUS;
+    if (data.animationStep >= LED_SUCCESS_EXPANSION_RADIUS) {
+        data.animationStep = LED_SUCCESS_EXPANSION_RADIUS;
         data.state = PositionState::EXPANDED;
     }
     
@@ -500,7 +499,7 @@ void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
 void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis) {
     PositionData& data = m_positions[position];
     
-    if (nowMillis - data.lastAnimationTime < ANIMATION_STEP_MS) return;
+    if (nowMillis - data.lastAnimationTime < LED_ANIMATION_STEP_MS) return;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
@@ -535,11 +534,11 @@ void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis
 }
 
 void LedController::updateBlinking(uint32_t nowMillis) {
-    for (uint8_t i = 0; i < NUM_POSITIONS; i++) {
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
         if (m_positions[i].state == PositionState::BLINKING) {
             PositionData& data = m_positions[i];
             
-            if (nowMillis - data.lastAnimationTime >= BLINK_INTERVAL_MS) {
+            if (nowMillis - data.lastAnimationTime >= LED_BLINK_INTERVAL_MS) {
                 data.blinkOn = !data.blinkOn;
                 data.lastAnimationTime = nowMillis;
                 
@@ -558,19 +557,19 @@ void LedController::updateBlinking(uint32_t nowMillis) {
 }
 
 void LedController::updateSequenceCompletedAnimation(uint32_t nowMillis) {
-    if (nowMillis - m_sequenceAnimLastTime < SEQ_STEP_DURATION_MS) return;
+    if (nowMillis - m_sequenceAnimLastTime < LED_SEQUENCE_STEP_MS) return;
     
     m_sequenceAnimStep++;
     m_sequenceAnimLastTime = nowMillis;
     
-    uint16_t totalSteps = SEQ_PULSE_COUNT * SEQ_PULSE_STEPS * 2;
+    uint16_t totalSteps = LED_SEQUENCE_PULSE_COUNT * LED_SEQUENCE_PULSE_STEPS * 2;
     
     if (m_sequenceAnimStep >= totalSteps) {
         m_strip1.clear();
         m_strip2.clear();
         m_needsUpdate = true;
         
-        for (uint8_t i = 0; i < NUM_POSITIONS; i++) {
+        for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
             m_positions[i].state = PositionState::OFF;
             m_positions[i].animationStep = 0;
         }
@@ -579,31 +578,28 @@ void LedController::updateSequenceCompletedAnimation(uint32_t nowMillis) {
         return;
     }
     
-    uint16_t stepsPerPulse = SEQ_PULSE_STEPS * 2;
+    uint16_t stepsPerPulse = LED_SEQUENCE_PULSE_STEPS * 2;
     uint16_t posInPulse = m_sequenceAnimStep % stepsPerPulse;
     
     uint8_t brightness;
-    if (posInPulse < SEQ_PULSE_STEPS) {
-        brightness = (posInPulse * SEQ_PULSE_MAX_BRIGHTNESS) / SEQ_PULSE_STEPS;
+    if (posInPulse < LED_SEQUENCE_PULSE_STEPS) {
+        brightness = (posInPulse * LED_SEQUENCE_MAX_BRIGHTNESS) / LED_SEQUENCE_PULSE_STEPS;
     } else {
-        uint16_t fadeOutPos = posInPulse - SEQ_PULSE_STEPS;
-        brightness = SEQ_PULSE_MAX_BRIGHTNESS - (fadeOutPos * SEQ_PULSE_MAX_BRIGHTNESS) / SEQ_PULSE_STEPS;
+        uint16_t fadeOutPos = posInPulse - LED_SEQUENCE_PULSE_STEPS;
+        brightness = LED_SEQUENCE_MAX_BRIGHTNESS - (fadeOutPos * LED_SEQUENCE_MAX_BRIGHTNESS) / LED_SEQUENCE_PULSE_STEPS;
     }
     
-    for (uint16_t i = 0; i < NUM_LEDS_STRIP1; i++) {
+    for (uint16_t i = 0; i < LED_STRIP_1_LENGTH; i++) {
         m_strip1.setPixelColor(i, m_strip1.Color(0, brightness, 0));
     }
-    for (uint16_t i = 0; i < NUM_LEDS_STRIP2; i++) {
+    for (uint16_t i = 0; i < LED_STRIP_2_LENGTH; i++) {
         m_strip2.setPixelColor(i, m_strip2.Color(0, brightness, 0));
     }
     m_needsUpdate = true;
 }
 
 void LedController::updateMenuChangeAnimation(uint32_t nowMillis) {
-    // Animation step duration - adjust for speed
-    static const uint16_t MENU_CHANGE_STEP_MS = 1;
-    
-    if (nowMillis - m_menuChangeLastTime < MENU_CHANGE_STEP_MS) return;
+    if (nowMillis - m_menuChangeLastTime < LED_MENU_CHANGE_STEP_MS) return;
     
     m_menuChangeLastTime = nowMillis;
     

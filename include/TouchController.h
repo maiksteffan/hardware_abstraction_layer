@@ -74,9 +74,9 @@ public:
 
 private:
     EventQueue* m_eventQueue;
-    TouchSensorState m_sensors[NUM_TOUCH_SENSORS];
-    ExpectState m_expectDown[NUM_TOUCH_SENSORS];
-    ExpectState m_expectUp[NUM_TOUCH_SENSORS];
+    TouchSensorState m_sensors[TOUCH_SENSOR_COUNT];
+    ExpectState m_expectDown[TOUCH_SENSOR_COUNT];
+    ExpectState m_expectUp[TOUCH_SENSOR_COUNT];
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
     

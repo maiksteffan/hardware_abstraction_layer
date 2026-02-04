@@ -1,31 +1,26 @@
 /**
  * =============================================================================
- * LED & Touch Controller Firmware v2.2
+ * LED & Touch Controller Firmware
  * Freenove ESP32 WROOM - Dual-Core FreeRTOS
  * =============================================================================
  * 
  * Target Hardware:
- *   - Freenove ESP32 WROOM
- *   - Dual-core Xtensa LX6 @ 240MHz
+ *   - Freenove ESP32 WROOM (Dual-core Xtensa LX6 @ 240MHz)
  *   - 4MB Flash, ~520KB SRAM
  * 
  * Architecture:
- *   - Core 0: Dedicated task for I2C touch sensor polling (5ms interval)
+ *   - Core 0: Touch sensor polling task (I2C at configurable interval)
  *   - Core 1: Main loop (serial, commands) + LED animation task
  * 
- * This firmware implements a hardware executor for LED and touch control.
- * All game logic resides on the Raspberry Pi - the ESP32 is a "dumb" 
- * hardware interface that executes commands and reports events.
+ * Purpose:
+ *   Hardware executor for LED and touch control. All game logic resides
+ *   on the Raspberry Pi - the ESP32 executes commands and reports events.
  * 
- * GPIO Pin Assignments:
- *   - LED Strip 1: GPIO 18
- *   - LED Strip 2: GPIO 19
- *   - I2C SDA: GPIO 21
- *   - I2C SCL: GPIO 22
+ * Communication:
+ *   Serial ASCII line-based protocol (see Config.h for baud rate)
  * 
- * Communication: Serial @ 115200 baud, ASCII line-based protocol
- * 
- * See README.md for complete protocol documentation.
+ * Configuration:
+ *   All hardware settings, timing, and pin assignments are in Config.h
  * =============================================================================
  */
 
@@ -46,44 +41,42 @@ LedController ledController;
 TouchController touchController;
 CommandController commandController(ledController, &touchController, eventQueue);
 
-// Task handles for monitoring (optional)
+// Task handles for monitoring
 TaskHandle_t touchTaskHandle = nullptr;
 TaskHandle_t ledTaskHandle = nullptr;
 
 // ============================================================================
-// FreeRTOS Task: Touch Sensor Polling (Core 0)
-// ============================================================================
-// This task runs on Core 0 and is dedicated to I2C touch sensor polling.
-// Using vTaskDelayUntil() ensures precise 5ms timing regardless of
-// how long the polling takes.
+// FreeRTOS Tasks
 // ============================================================================
 
+/**
+ * @brief Touch sensor polling task (runs on dedicated core)
+ * 
+ * Uses vTaskDelayUntil() for precise timing that compensates
+ * for execution time variations.
+ */
 void touchPollingTask(void* parameter) {
     TickType_t lastWakeTime = xTaskGetTickCount();
     const TickType_t pollInterval = pdMS_TO_TICKS(TOUCH_POLL_INTERVAL_MS);
     
     for (;;) {
         touchController.tick();
-        
-        // Use vTaskDelayUntil for precise timing (compensates for execution time)
         vTaskDelayUntil(&lastWakeTime, pollInterval);
     }
 }
 
-// ============================================================================
-// FreeRTOS Task: LED Animation (Core 1)
-// ============================================================================
-// This task handles LED animations independently from the main loop.
-// Running at ANIMATION_STEP_MS intervals for smooth animations.
-// ============================================================================
-
+/**
+ * @brief LED animation task (runs on main core)
+ * 
+ * Handles LED animations independently from serial processing
+ * for smooth visual output.
+ */
 void ledAnimationTask(void* parameter) {
     TickType_t lastWakeTime = xTaskGetTickCount();
-    const TickType_t animInterval = pdMS_TO_TICKS(ANIMATION_STEP_MS);
+    const TickType_t animInterval = pdMS_TO_TICKS(LED_ANIMATION_STEP_MS);
     
     for (;;) {
         ledController.tick();
-        
         vTaskDelayUntil(&lastWakeTime, animInterval);
     }
 }
@@ -93,18 +86,18 @@ void ledAnimationTask(void* parameter) {
 // ============================================================================
 
 void setup() {
-    // Configure serial buffers BEFORE Serial.begin()
+    // Initialize serial with configured buffer sizes
     Serial.setRxBufferSize(SERIAL_RX_BUFFER_SIZE);
     Serial.setTxBufferSize(SERIAL_TX_BUFFER_SIZE);
     Serial.begin(SERIAL_BAUD_RATE);
     
-    // Wait for serial (with timeout)
+    // Wait for serial connection (with timeout)
     uint32_t startTime = millis();
-    while (!Serial && (millis() - startTime < 3000)) {
+    while (!Serial && (millis() - startTime < SERIAL_WAIT_TIMEOUT_MS)) {
         delay(10);
     }
     
-    // Initialize components
+    // Initialize controllers
     eventQueue.begin();
     ledController.begin();
     
@@ -113,34 +106,34 @@ void setup() {
     
     commandController.begin();
     
-    // Create touch polling task on Core 0 (dedicated I2C core)
+    // Create touch polling task on dedicated core
     xTaskCreatePinnedToCore(
-        touchPollingTask,           // Task function
-        "TouchPoll",                // Task name
-        TASK_STACK_SIZE_TOUCH,      // Stack size (bytes)
-        NULL,                       // Task parameters
-        TASK_PRIORITY_TOUCH,        // Priority
-        &touchTaskHandle,           // Task handle
-        CORE_TOUCH_POLLING          // Core 0
+        touchPollingTask,
+        "TouchPoll",
+        STACK_SIZE_TOUCH_TASK,
+        NULL,
+        PRIORITY_TOUCH_TASK,
+        &touchTaskHandle,
+        CORE_TOUCH_SENSOR
     );
     
-    // Create LED animation task on Core 1
+    // Create LED animation task on main core
     xTaskCreatePinnedToCore(
-        ledAnimationTask,           // Task function
-        "LEDAnim",                  // Task name
-        TASK_STACK_SIZE_LED,        // Stack size (bytes)
-        NULL,                       // Task parameters
-        TASK_PRIORITY_LED,          // Priority
-        &ledTaskHandle,             // Task handle
-        CORE_MAIN                   // Core 1
+        ledAnimationTask,
+        "LEDAnim",
+        STACK_SIZE_LED_TASK,
+        NULL,
+        PRIORITY_LED_TASK,
+        &ledTaskHandle,
+        CORE_MAIN_LOOP
     );
     
-    // Send ready info
-    eventQueue.queueInfo(NO_COMMAND_ID);
+    // Send startup information
+    eventQueue.queueInfo(COMMAND_ID_NONE);
     eventQueue.flush(1);
     
-    // Report active sensors
-    char sensorList[64];
+    // Report detected sensors
+    char sensorList[SENSOR_LIST_BUFFER_SIZE];
     touchController.buildActiveSensorList(sensorList, sizeof(sensorList));
     Serial.print("SCANNED [");
     Serial.print(sensorList);
@@ -152,27 +145,18 @@ void setup() {
 // ============================================================================
 // Main Loop (Core 1)
 // ============================================================================
-// The main loop now only handles:
-// - Serial communication (receiving commands)
-// - Command parsing and processing
-// - Flushing events to serial
-// 
-// Touch polling and LED animations are handled by dedicated FreeRTOS tasks.
-// ============================================================================
 
 void loop() {
-    // 1. Poll serial for incoming commands from Raspberry Pi
+    // Handle incoming serial commands from Raspberry Pi
     commandController.pollSerial();
-    
-    // 2. Process complete command lines
     commandController.processCompletedLines();
     
-    // 3. Tick command executor (long-running commands)
+    // Advance long-running command execution
     commandController.tick();
     
-    // 4. Flush pending events to serial
-    eventQueue.flush(5);
+    // Send pending events over serial
+    eventQueue.flush(EVENTS_PER_FLUSH);
     
-    // 5. Small yield to prevent watchdog issues and allow other tasks to run
+    // Yield to prevent watchdog timeout
     yield();
 }
