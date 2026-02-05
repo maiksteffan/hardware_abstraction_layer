@@ -111,4 +111,4 @@ private:
     void updateMenuChangeAnimation(uint32_t nowMillis);
 };
 
-#endif // LED_CONTROLLER_H
+#endif // LED_CONTROLL

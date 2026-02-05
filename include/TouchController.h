@@ -88,4 +88,4 @@ private:
     void processDebounce();
 };
 
-#endif // TOUCH_CONTROLLER_H
+#endif // TOUCH_CONTROLLER

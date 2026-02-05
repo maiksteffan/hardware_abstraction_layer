@@ -171,10 +171,8 @@ void LedController::hideAll() {
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
     }
-    
     m_sequenceAnimActive = false;
     m_menuChangeActive = false;
-    
     m_needsUpdate = true;
 }
 
