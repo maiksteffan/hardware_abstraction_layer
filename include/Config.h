@@ -135,7 +135,7 @@ constexpr uint16_t LED_SEQUENCE_STEP_MS = 10;
 constexpr uint16_t LED_MENU_CHANGE_STEP_MS = 1;
 
 // Animation parameters
-constexpr uint8_t LED_SUCCESS_EXPANSION_RADIUS = 5;
+constexpr uint8_t LED_SUCCESS_EXPANSION_RADIUS = 4;
 constexpr uint8_t LED_SEQUENCE_PULSE_COUNT = 2;
 constexpr uint16_t LED_SEQUENCE_PULSE_STEPS = 20;
 constexpr uint8_t LED_SEQUENCE_MAX_BRIGHTNESS = 40;
@@ -210,7 +210,7 @@ constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 // ============================================================================
 
 constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
-    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E
+    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E (FOR DEVBOARD)
     0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
     0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O
     0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // P-T

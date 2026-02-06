@@ -16,11 +16,13 @@
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP1, 153 },  // A
-    { StripId::STRIP1, 165 },  // B
-    { StripId::STRIP1, 177 },  // C
-    { StripId::STRIP2, 177 },  // D
-    { StripId::STRIP2, 165 },  // E
+    { StripId::STRIP1, 7 },  // A
+    { StripId::STRIP1, 19 },  // B
+    { StripId::STRIP1, 31 },  // C
+    { StripId::STRIP1, 43 },  // D
+    { StripId::STRIP1, 55 },  // E
+
+    //for the full setup
     { StripId::STRIP2, 153 },  // F
     { StripId::STRIP1, 130 },  // G
     { StripId::STRIP1, 118 },  // H
@@ -182,10 +184,13 @@ bool LedController::success(uint8_t position) {
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
     
+    // If this position was already animating/expanded, clear its old region first
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED) {
         clearExpandedRegion(position, mapping);
-    } else if (m_positions[position].state == PositionState::SHOWN) {
+    } else if (m_positions[position].state == PositionState::SHOWN ||
+               m_positions[position].state == PositionState::BLINKING) {
+        // Just clear the single center LED
         setLed(mapping->strip, mapping->index, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     }
     
@@ -193,6 +198,7 @@ bool LedController::success(uint8_t position) {
     m_positions[position].animationStep = 0;
     m_positions[position].lastAnimationTime = millis();
     
+    // Set center LED to green immediately
     setLed(mapping->strip, mapping->index, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     m_needsUpdate = true;
     
@@ -469,17 +475,19 @@ void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
     data.animationStep++;
     data.lastAnimationTime = nowMillis;
     
-    if (data.animationStep >= LED_SUCCESS_EXPANSION_RADIUS) {
+    if (data.animationStep > LED_SUCCESS_EXPANSION_RADIUS) {
         data.animationStep = LED_SUCCESS_EXPANSION_RADIUS;
         data.state = PositionState::EXPANDED;
     }
     
-    // Render expanded region
+    // Re-render the entire expanded region to prevent color bleeding from concurrent access
     uint16_t stripLen = getStripLength(mapping->strip);
     int16_t center = mapping->index;
     
+    // Always set center LED
     setLed(mapping->strip, center, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     
+    // Set all expanded LEDs up to current step
     for (uint8_t r = 1; r <= data.animationStep; r++) {
         int16_t leftIdx = center - r;
         if (leftIdx >= 0) {

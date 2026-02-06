@@ -43,7 +43,6 @@ CommandController commandController(ledController, &touchController, eventQueue)
 
 // Task handles for monitoring
 TaskHandle_t touchTaskHandle = nullptr;
-TaskHandle_t ledTaskHandle = nullptr;
 
 // ============================================================================
 // FreeRTOS Tasks
@@ -62,22 +61,6 @@ void touchPollingTask(void* parameter) {
     for (;;) {
         touchController.tick();
         vTaskDelayUntil(&lastWakeTime, pollInterval);
-    }
-}
-
-/**
- * @brief LED animation task (runs on main core)
- * 
- * Handles LED animations independently from serial processing
- * for smooth visual output.
- */
-void ledAnimationTask(void* parameter) {
-    TickType_t lastWakeTime = xTaskGetTickCount();
-    const TickType_t animInterval = pdMS_TO_TICKS(LED_ANIMATION_STEP_MS);
-    
-    for (;;) {
-        ledController.tick();
-        vTaskDelayUntil(&lastWakeTime, animInterval);
     }
 }
 
@@ -117,16 +100,8 @@ void setup() {
         CORE_TOUCH_SENSOR
     );
     
-    // Create LED animation task on main core
-    xTaskCreatePinnedToCore(
-        ledAnimationTask,
-        "LEDAnim",
-        STACK_SIZE_LED_TASK,
-        NULL,
-        PRIORITY_LED_TASK,
-        &ledTaskHandle,
-        CORE_MAIN_LOOP
-    );
+    // Note: LED animation is now handled in main loop to avoid race conditions
+    // with command processing. Both modify the NeoPixel buffer which is not thread-safe.
     
     // Send startup information
     eventQueue.queueInfo(COMMAND_ID_NONE);
@@ -153,6 +128,9 @@ void loop() {
     
     // Advance long-running command execution
     commandController.tick();
+    
+    // Update LED animations (done here to avoid race conditions with command processing)
+    ledController.tick();
     
     // Send pending events over serial
     eventQueue.flush(EVENTS_PER_FLUSH);
