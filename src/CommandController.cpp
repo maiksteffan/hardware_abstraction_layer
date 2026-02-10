@@ -124,15 +124,7 @@ bool CommandController::extractLine() {
         }
     }
     
-    // Timeout-based line completion for terminals that don't send line endings
-    // If we have data in the line buffer and no new data for 50ms, treat as complete
-    if (m_lineIndex > 0 && (millis() - m_lastRxTime) > 50) {
-        m_lineBuffer[m_lineIndex] = '\0';
-        m_lineIndex = 0;
-        m_lineOverflow = false;
-        return true;
-    }
-    
+    // Commands must be terminated with \n or \r
     return false;
 }
 

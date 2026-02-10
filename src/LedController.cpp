@@ -16,11 +16,11 @@
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP1, 7 },  // A
-    { StripId::STRIP1, 19 },  // B
-    { StripId::STRIP1, 31 },  // C
-    { StripId::STRIP1, 43 },  // D
-    { StripId::STRIP1, 55 },  // E
+    { StripId::STRIP2, 7 },  // A
+    { StripId::STRIP2, 19 },  // B
+    { StripId::STRIP2, 31 },  // C
+    { StripId::STRIP2, 43 },  // D
+    { StripId::STRIP2, 55 },  // E
 
     //for the full setup
     { StripId::STRIP2, 153 },  // F

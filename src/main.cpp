@@ -85,7 +85,23 @@ void setup() {
     ledController.begin();
     
     touchController.setEventQueue(&eventQueue);
-    touchController.begin();
+    
+    // Initialize touch sensors, retry until all expected sensors are found
+    while (true) {
+        touchController.begin();
+        
+        uint8_t foundCount = touchController.getActiveSensorCount();
+        if (foundCount >= EXPECTED_SENSOR_COUNT) {
+            break;
+        }
+        
+        Serial.print("Found ");
+        Serial.print(foundCount);
+        Serial.print("/");
+        Serial.print(EXPECTED_SENSOR_COUNT);
+        Serial.println(" sensors, retrying...");
+        delay(300);  // Brief delay before retry
+    }
     
     commandController.begin();
     
