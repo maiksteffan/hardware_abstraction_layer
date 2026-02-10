@@ -10,7 +10,6 @@ Serial interface for controlling LEDs and reading touch sensors from a Raspberry
 | Format | 8N1 |
 | Line Ending | `\n` |
 
-**Startup**: Wait for `READY` message before sending commands.
 
 ## Command Format
 
@@ -80,14 +79,24 @@ COMMAND [position] [params] [#id]
 import serial
 
 ser = serial.Serial('/dev/ttyUSB0', 115200)
-ser.readline()  # Wait for READY
 
-ser.write(b'SHOW A #1\n')       # Turn on LED
-ser.write(b'EXPECT A #2\n')     # Wait for touch
-# → TOUCHED A #2
-ser.write(b'SUCCESS A #3\n')    # Play success animation
-# → DONE SUCCESS A #3
-ser.write(b'HIDE A #4\n')       # Turn off
+# Turn on LED at position A
+ser.write(b'SHOW A #1\n')
+print(ser.readline())  # → ACK SHOW A #1
+
+# Wait for user to touch sensor A
+ser.write(b'EXPECT A #2\n')
+print(ser.readline())  # → ACK EXPECT A #2
+print(ser.readline())  # → TOUCHED A #2  (when user touches)
+
+# Play success animation
+ser.write(b'SUCCESS A #3\n')
+print(ser.readline())  # → ACK SUCCESS A #3
+print(ser.readline())  # → DONE SUCCESS A #3  (when animation completes)
+
+# Turn off LED
+ser.write(b'HIDE A #4\n')
+print(ser.readline())  # → ACK HIDE A #4
 ```
 
 ## Timing
