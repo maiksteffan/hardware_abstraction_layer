@@ -31,6 +31,7 @@
 #include "TouchController.h"
 #include "CommandController.h"
 #include "EventQueue.h"
+#include "StartupController.h"
 
 // ============================================================================
 // Global Instances
@@ -40,6 +41,7 @@ EventQueue eventQueue;
 LedController ledController;
 TouchController touchController;
 CommandController commandController(ledController, &touchController, eventQueue);
+StartupController startupController(ledController, touchController, Serial);
 
 // Task handles for monitoring
 TaskHandle_t touchTaskHandle = nullptr;
@@ -80,28 +82,13 @@ void setup() {
         delay(10);
     }
     
-    // Initialize controllers
+    // Initialize event queue
     eventQueue.begin();
-    ledController.begin();
     
     touchController.setEventQueue(&eventQueue);
     
-    // Initialize touch sensors, retry until all expected sensors are found
-    while (true) {
-        touchController.begin();
-        
-        uint8_t foundCount = touchController.getActiveSensorCount();
-        if (foundCount >= EXPECTED_SENSOR_COUNT) {
-            break;
-        }
-        
-        Serial.print("Found ");
-        Serial.print(foundCount);
-        Serial.print("/");
-        Serial.print(EXPECTED_SENSOR_COUNT);
-        Serial.println(" sensors, retrying...");
-        delay(300);  // Brief delay before retry
-    }
+    // Hardware initialization + Pi handshake (blocks until ACK)
+    startupController.run();
     
     commandController.begin();
     
@@ -118,19 +105,6 @@ void setup() {
     
     // Note: LED animation is now handled in main loop to avoid race conditions
     // with command processing. Both modify the NeoPixel buffer which is not thread-safe.
-    
-    // Send startup information
-    eventQueue.queueInfo(COMMAND_ID_NONE);
-    eventQueue.flush(1);
-    
-    // Report detected sensors
-    char sensorList[SENSOR_LIST_BUFFER_SIZE];
-    touchController.buildActiveSensorList(sensorList, sizeof(sensorList));
-    Serial.print("SCANNED [");
-    Serial.print(sensorList);
-    Serial.println("]");
-    
-    Serial.println("READY");
 }
 
 // ============================================================================

@@ -105,13 +105,18 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // 6. TOUCH SENSING
 // ============================================================================
 
-constexpr uint8_t TOUCH_SENSOR_COUNT = 25;  // Total sensors (A-Y)
-constexpr uint8_t EXPECTED_SENSOR_COUNT = 0; // Number of sensors expected to be found on startup
+constexpr uint8_t TOUCH_SENSOR_COUNT = 5;  // Sensors on devboard (A-E)
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
+
+// Startup sequence timing
+constexpr uint32_t STARTUP_HANDSHAKE_INTERVAL_MS = 3000;
+constexpr uint16_t SENSOR_INIT_DELAY_MS = 1500;
+constexpr uint16_t LED_INIT_DELAY_MS = 500;
+constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 
 // ============================================================================
 // 7. LED CONTROL
@@ -211,7 +216,7 @@ constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 // 10. SENSOR I2C ADDRESSES (A-Y mapping)
 // ============================================================================
 
-constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
+constexpr uint8_t SENSOR_I2C_ADDRESSES[25] = {
     0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E (FOR DEVBOARD)
     0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
     0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O

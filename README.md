@@ -20,6 +20,38 @@ COMMAND [position] [params] [#id]
 - **position**: Letter `A`-`Y` (25 positions)
 - **#id**: Optional ID returned in response for correlation
 
+## Startup Sequence
+
+On power-up the ESP32 initializes hardware and performs a handshake with the
+Raspberry Pi **before** any FreeRTOS tasks are created. The handshake ensures
+both sides agree on hardware state before normal operation begins.
+
+### Protocol
+
+If all sensors are detected:
+
+```
+ESP → Pi:   SENSORS READY              (repeats every 3s until ACK)
+Pi  → ESP:  ACK SENSORS READY
+ESP → Pi:   HARDWARE INITIALISED
+```
+
+If some sensors are missing:
+
+```
+ESP → Pi:   SENSORS FAILED [A,B,C]     (repeats every 3s until ACK)
+Pi  → ESP:  ACK SENSORS FAILED
+ESP → Pi:   HARDWARE INITIALISED
+```
+
+Both sides should repeat: the ESP repeats its status message every 3 seconds,
+and the Pi should re-send its ACK if it doesn't see `HARDWARE INITIALISED`
+within a reasonable timeout.
+
+LED status is not reported because NeoPixel strips provide no electrical
+feedback — the startup animation (a white pixel sweep across every LED) serves
+as visual-only confirmation.
+
 ## Commands
 
 ### LED Control

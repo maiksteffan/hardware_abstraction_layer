@@ -77,6 +77,12 @@ public:
     bool isContractComplete(uint8_t position) const;
     bool isBlinking(uint8_t position) const;
     
+    // Low-level access (used by StartupController animation)
+    uint16_t getLedCount(StripId strip) const;
+    void setPixelColor(StripId strip, uint16_t index, uint8_t r, uint8_t g, uint8_t b);
+    void showStrip();
+    void clearAll();
+    
     // Utilities
     static uint8_t charToPosition(char c);
     static char positionToChar(uint8_t pos);

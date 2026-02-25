@@ -441,6 +441,34 @@ void LedController::setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, u
     }
 }
 
+// ============================================================================
+// Low-level access (used by StartupController)
+// ============================================================================
+
+uint16_t LedController::getLedCount(StripId strip) const {
+    return getStripLength(strip);
+}
+
+void LedController::setPixelColor(StripId strip, uint16_t index, uint8_t r, uint8_t g, uint8_t b) {
+    Adafruit_NeoPixel* stripPtr = const_cast<LedController*>(this)->getStrip(strip);
+    uint16_t stripLen = getStripLength(strip);
+    if (index < stripLen) {
+        stripPtr->setPixelColor(index, stripPtr->Color(r, g, b));
+    }
+}
+
+void LedController::showStrip() {
+    m_strip1.show();
+    m_strip2.show();
+}
+
+void LedController::clearAll() {
+    m_strip1.clear();
+    m_strip2.clear();
+    m_strip1.show();
+    m_strip2.show();
+}
+
 void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapping) {
     if (!mapping) return;
     
