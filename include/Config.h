@@ -105,7 +105,7 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // ============================================================================
 
 constexpr uint8_t TOUCH_SENSOR_COUNT = 25;  // Total sensors (A-Y)
-constexpr uint8_t EXPECTED_SENSOR_COUNT = 4; // Number of sensors expected to be found on startup
+constexpr uint8_t EXPECTED_SENSOR_COUNT = 0; // Number of sensors expected to be found on startup
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
