@@ -27,6 +27,15 @@ TouchController::TouchController()
         m_expectUp[i].active = false;
         m_expectUp[i].commandId = COMMAND_ID_NONE;
     }
+    
+    for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
+        m_expectAnyQueue[i].active = false;
+        m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
+    }
+    m_expectAnyHead = 0;
+    m_expectAnyTail = 0;
+    
+    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
 
 // ============================================================================
@@ -136,6 +145,28 @@ void TouchController::clearExpectUp(uint8_t sensorIndex) {
     if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectUp[sensorIndex].active = false;
     m_expectUp[sensorIndex].commandId = COMMAND_ID_NONE;
+}
+
+void TouchController::setExpectAny(uint32_t commandId) {
+    // Enqueue into circular buffer
+    m_expectAnyQueue[m_expectAnyHead].active = true;
+    m_expectAnyQueue[m_expectAnyHead].commandId = commandId;
+    m_expectAnyHead = (m_expectAnyHead + 1) % EXPECT_ANY_QUEUE_SIZE;
+    
+    // If head catches tail, advance tail (drop oldest)
+    if (m_expectAnyHead == m_expectAnyTail) {
+        m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
+    }
+}
+
+void TouchController::clearExpectAny() {
+    for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
+        m_expectAnyQueue[i].active = false;
+        m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
+    }
+    m_expectAnyHead = 0;
+    m_expectAnyTail = 0;
+    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
 
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
@@ -313,6 +344,18 @@ void TouchController::processDebounce() {
                         char letter = indexToLetter(i);
                         
                         if (sensor.debouncedTouched) {
+                            // Check expect-any queue (skip positions already reported)
+                            if (m_expectAnyTail != m_expectAnyHead && m_expectAnyQueue[m_expectAnyTail].active && !m_expectAnyUsed[i]) {
+                                m_eventQueue->queueTouched(letter, m_expectAnyQueue[m_expectAnyTail].commandId);
+                                m_expectAnyQueue[m_expectAnyTail].active = false;
+                                m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
+                                m_expectAnyUsed[i] = true;
+                                
+                                // Reset used mask when queue is empty
+                                if (m_expectAnyTail == m_expectAnyHead) {
+                                    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
+                                }
+                            }
                             if (m_expectDown[i].active) {
                                 m_eventQueue->queueTouched(letter, m_expectDown[i].commandId);
                                 m_expectDown[i].active = false;

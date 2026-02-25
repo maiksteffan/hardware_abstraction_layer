@@ -19,6 +19,7 @@
  * 
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for touch
+ *   EXPECT_ANY [#id]              - Wait for any touch (first touched position)
  *   EXPECT_RELEASE <pos> [#id]    - Wait for release
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
@@ -59,6 +60,7 @@ enum class CommandAction : uint8_t {
     CONTRACT_STEP,
     MENUE_CHANGE,
     EXPECT,
+    EXPECT_ANY,
     EXPECT_RELEASE,
     RECALIBRATE,
     RECALIBRATE_ALL,

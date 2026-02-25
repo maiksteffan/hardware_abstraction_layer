@@ -281,6 +281,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
+    if (strcasecmpN(str, "EXPECT_ANY", len)) return CommandAction::EXPECT_ANY;
     if (strcasecmpN(str, "EXPECT", len)) return CommandAction::EXPECT;
     if (strcasecmpN(str, "EXPECT_RELEASE", len)) return CommandAction::EXPECT_RELEASE;
     if (strcasecmpN(str, "RECALIBRATE", len)) return CommandAction::RECALIBRATE;
@@ -308,6 +309,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
+        case CommandAction::EXPECT_ANY: return "EXPECT_ANY";
         case CommandAction::EXPECT_RELEASE: return "EXPECT_RELEASE";
         case CommandAction::RECALIBRATE: return "RECALIBRATE";
         case CommandAction::RECALIBRATE_ALL: return "RECALIBRATE_ALL";
@@ -445,6 +447,15 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             if (m_touchController) {
                 m_touchController->setExpectDown(cmd.positionIndex, cmdId);
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+            
+        case CommandAction::EXPECT_ANY:
+            if (m_touchController) {
+                m_touchController->setExpectAny(cmdId);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }

@@ -82,6 +82,7 @@ constexpr uint16_t SERIAL_LINE_TIMEOUT_MS = 50;    // Timeout to complete partia
 // Queue capacities
 constexpr uint8_t QUEUE_SIZE_COMMANDS = 32;
 constexpr uint8_t QUEUE_SIZE_EVENTS   = 64;
+constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY commands
 
 // Flush settings
 constexpr uint8_t EVENTS_PER_FLUSH = 5;  // Max events to send per loop iteration

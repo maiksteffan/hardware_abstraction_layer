@@ -56,8 +56,10 @@ public:
     // Expectations
     void setExpectDown(uint8_t sensorIndex, uint32_t commandId);
     void setExpectUp(uint8_t sensorIndex, uint32_t commandId);
+    void setExpectAny(uint32_t commandId);
     void clearExpectDown(uint8_t sensorIndex);
     void clearExpectUp(uint8_t sensorIndex);
+    void clearExpectAny();
     
     // State queries
     bool isSensorActive(uint8_t sensorIndex) const;
@@ -77,6 +79,10 @@ private:
     TouchSensorState m_sensors[TOUCH_SENSOR_COUNT];
     ExpectState m_expectDown[TOUCH_SENSOR_COUNT];
     ExpectState m_expectUp[TOUCH_SENSOR_COUNT];
+    ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
+    uint8_t m_expectAnyHead;   // Next write index
+    uint8_t m_expectAnyTail;   // Next read index
+    bool m_expectAnyUsed[TOUCH_SENSOR_COUNT];  // Positions already reported by EXPECT_ANY
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
     
