@@ -21,6 +21,7 @@
  *   EXPECT <pos> [#id]            - Wait for touch
  *   EXPECT_ANY [#id]              - Wait for any touch (first touched position)
  *   EXPECT_RELEASE <pos> [#id]    - Wait for release
+ *   CLEAN_QUEUE [#id]             - Clear all pending touch expectations
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value
@@ -62,6 +63,7 @@ enum class CommandAction : uint8_t {
     EXPECT,
     EXPECT_ANY,
     EXPECT_RELEASE,
+    CLEAN_QUEUE,
     RECALIBRATE,
     RECALIBRATE_ALL,
     VALUE,

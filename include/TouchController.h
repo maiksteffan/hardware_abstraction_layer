@@ -60,6 +60,7 @@ public:
     void clearExpectDown(uint8_t sensorIndex);
     void clearExpectUp(uint8_t sensorIndex);
     void clearExpectAny();
+    void clearAllExpectations();
     
     // State queries
     bool isSensorActive(uint8_t sensorIndex) const;

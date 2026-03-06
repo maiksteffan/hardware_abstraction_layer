@@ -169,6 +169,16 @@ void TouchController::clearExpectAny() {
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
 
+void TouchController::clearAllExpectations() {
+    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
+        m_expectDown[i].active = false;
+        m_expectDown[i].commandId = COMMAND_ID_NONE;
+        m_expectUp[i].active = false;
+        m_expectUp[i].commandId = COMMAND_ID_NONE;
+    }
+    clearExpectAny();
+}
+
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
     if (bufferSize == 0) return;
     
@@ -306,7 +316,11 @@ void TouchController::pollSensors() {
         if (!m_sensors[i].active) continue;
         
         uint8_t address = SENSOR_I2C_ADDRESSES[i];
-        bool touched = readRawTouch(address);
+        int8_t result = readRawTouch(address);
+        
+        if (result < 0) continue;  // I2C error — skip, keep previous state
+        
+        bool touched = (result == 1);
         
         if (touched != m_sensors[i].currentTouched) {
             m_sensors[i].currentTouched = touched;

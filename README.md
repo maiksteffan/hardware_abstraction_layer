@@ -78,6 +78,7 @@ as visual-only confirmation.
 | EXPECT | `EXPECT A [#id]` | `ACK` → `TOUCHED A` | Wait for touch |
 | EXPECT_ANY | `EXPECT_ANY [#id]` | `ACK` → `TOUCHED <pos>` | Wait for any touch (first hit) |
 | EXPECT_RELEASE | `EXPECT_RELEASE A [#id]` | `ACK` → `TOUCH_RELEASED A` | Wait for release |
+| CLEAN_QUEUE | `CLEAN_QUEUE [#id]` | `ACK CLEAN_QUEUE` | Clear all pending touch expectations |
 | RECALIBRATE | `RECALIBRATE A [#id]` | `ACK` → `RECALIBRATED A` | Recalibrate sensor |
 | RECALIBRATE_ALL | `RECALIBRATE_ALL [#id]` | `ACK` → `RECALIBRATED ALL` | Recalibrate all |
 | VALUE | `VALUE A [#id]` | `VALUE A <delta>` | Get delta (-128 to 127) |
