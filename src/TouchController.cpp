@@ -123,6 +123,21 @@ bool TouchController::setSensitivity(uint8_t sensorIndex, uint8_t level) {
     return writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue);
 }
 
+bool TouchController::getSensitivity(uint8_t sensorIndex, uint8_t& level) {
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
+    if (!m_sensors[sensorIndex].active) return false;
+
+    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+    uint8_t regValue;
+    if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue)) {
+        return false;
+    }
+
+    // Sensitivity is in bits 6:4 (DELTA_SENSE[2:0])
+    level = (regValue >> 4) & 0x07;
+    return true;
+}
+
 void TouchController::setExpectDown(uint8_t sensorIndex, uint32_t commandId) {
     if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
     m_expectDown[sensorIndex].active = true;

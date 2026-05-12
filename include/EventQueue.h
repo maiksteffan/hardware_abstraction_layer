@@ -28,7 +28,8 @@ enum class EventType : uint8_t {
     SCANNED,        // Sensor scan complete
     RECALIBRATED,   // Sensor recalibrated
     INFO,           // Firmware info
-    VALUE           // Sensor value response
+    VALUE,          // Sensor value response
+    SENSITIVITY     // Sensitivity level response
 };
 
 // ============================================================================
@@ -71,6 +72,7 @@ public:
     bool queueRecalibrated(char position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
     bool queueValue(char position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueSensitivity(char position, uint8_t level, uint32_t commandId = COMMAND_ID_NONE);
 
 private:
     Event m_events[QUEUE_SIZE_EVENTS];

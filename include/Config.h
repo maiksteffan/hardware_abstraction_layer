@@ -41,8 +41,8 @@
 // ============================================================================
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
-constexpr uint8_t PIN_LED_STRIP_2 = 25;  // GPIO19 - VSPI MISO
+constexpr uint8_t PIN_LED_STRIP_1 = 19;  // GPIO18 - VSPI CLK
+constexpr uint8_t PIN_LED_STRIP_2 = 18;  // GPIO19 - VSPI MISO
 
 // I2C Pins
 constexpr uint8_t PIN_I2C_SDA = 21;  // Default ESP32 SDA

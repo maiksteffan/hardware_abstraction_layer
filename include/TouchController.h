@@ -52,6 +52,7 @@ public:
     
     // Sensitivity control
     bool setSensitivity(uint8_t sensorIndex, uint8_t level);
+    bool getSensitivity(uint8_t sensorIndex, uint8_t& level);
     
     // Expectations
     void setExpectDown(uint8_t sensorIndex, uint32_t commandId);

@@ -26,6 +26,7 @@
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value
  *   SET_SENSITIVITY <pos> <lvl>   - Set sensitivity (0=most, 7=least)
+ *   GET_SENSITIVITY <pos> [#id]   - Read current sensitivity level
  * 
  * Utility Commands:
  *   PING [#id]                    - Health check
@@ -68,6 +69,7 @@ enum class CommandAction : uint8_t {
     RECALIBRATE_ALL,
     VALUE,
     SET_SENSITIVITY,
+    GET_SENSITIVITY,
     SCAN,
     SEQUENCE_COMPLETED,
     INFO,
