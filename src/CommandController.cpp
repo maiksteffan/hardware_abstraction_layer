@@ -135,7 +135,7 @@ bool CommandController::extractLine() {
 bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.action = CommandAction::INVALID;
     cmd.hasPosition = false;
-    cmd.position = 0;
+    cmd.position[0] = '\0';
     cmd.positionIndex = 255;
     cmd.hasId = false;
     cmd.id = COMMAND_ID_NONE;
@@ -218,8 +218,20 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             return false;
         }
         
-        cmd.position = (*p >= 'a' && *p <= 'z') ? (*p - 32) : *p;
-        cmd.positionIndex = charToIndex(cmd.position);
+        const char* positionStart = p;
+        const char* positionEnd = findTokenEnd(p);
+        size_t positionLen = positionEnd - positionStart;
+        if (positionLen >= POSITION_TOKEN_SIZE) {
+            m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
+            return false;
+        }
+
+        for (size_t i = 0; i < positionLen; i++) {
+            char c = positionStart[i];
+            cmd.position[i] = (c >= 'a' && c <= 'z') ? (c - 32) : c;
+        }
+        cmd.position[positionLen] = '\0';
+        cmd.positionIndex = positionTokenToIndex(cmd.position, positionLen);
         
         if (cmd.positionIndex == 255) {
             m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
@@ -227,7 +239,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         }
         
         cmd.hasPosition = true;
-        p = skipWhitespace(p + 1);
+        p = skipWhitespace(positionEnd);
     }
     
     // Parse extra numeric value if needed (e.g., sensitivity level)
@@ -403,7 +415,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::HIDE_ALL:
             m_ledController.hideAll();
-            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            m_eventQueue.queueAck(actionStr, nullptr, cmdId);
             break;
             
         case CommandAction::FAIL:
@@ -458,7 +470,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
         case CommandAction::EXPECT_ANY:
             if (m_touchController) {
                 m_touchController->setExpectAny(cmdId);
-                m_eventQueue.queueAck(actionStr, 0, cmdId);
+                m_eventQueue.queueAck(actionStr, nullptr, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
@@ -476,7 +488,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
         case CommandAction::CLEAN_QUEUE:
             if (m_touchController) {
                 m_touchController->clearAllExpectations();
-                m_eventQueue.queueAck(actionStr, 0, cmdId);
+                m_eventQueue.queueAck(actionStr, nullptr, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
@@ -498,8 +510,8 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
         case CommandAction::RECALIBRATE_ALL:
             if (m_touchController) {
                 m_touchController->recalibrateAll();
-                m_eventQueue.queueAck(actionStr, 0, cmdId);
-                m_eventQueue.queueRecalibrated(0, cmdId);
+                m_eventQueue.queueAck(actionStr, nullptr, cmdId);
+                m_eventQueue.queueRecalibrated(nullptr, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
@@ -532,7 +544,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::SCAN:
             if (m_touchController) {
-                char sensorList[64];
+                char sensorList[SENSOR_LIST_BUFFER_SIZE];
                 m_touchController->buildActiveSensorList(sensorList, sizeof(sensorList));
                 m_eventQueue.queueScanned(sensorList, cmdId);
             } else {
@@ -558,7 +570,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             break;
             
         case CommandAction::PING:
-            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            m_eventQueue.queueAck(actionStr, nullptr, cmdId);
             break;
             
         default:
@@ -621,14 +633,14 @@ void CommandController::tickCommand(QueuedCommand& qc) {
             
         case CommandAction::SEQUENCE_COMPLETED:
             if (m_ledController.isSequenceCompletedAnimationComplete()) {
-                m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
+                m_eventQueue.queueDone(actionToString(qc.command.action), nullptr, cmdId);
                 qc.active = false;
             }
             break;
             
         case CommandAction::MENUE_CHANGE:
             if (m_ledController.isMenuChangeAnimationComplete()) {
-                m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
+                m_eventQueue.queueDone(actionToString(qc.command.action), nullptr, cmdId);
                 qc.active = false;
             }
             break;
@@ -663,8 +675,14 @@ bool CommandController::strcasecmpN(const char* a, const char* b, size_t len) {
     return true;
 }
 
-uint8_t CommandController::charToIndex(char c) {
-    if (c >= 'a' && c <= 'y') c -= 32;
-    if (c >= 'A' && c <= 'Y') return c - 'A';
-    return 255;
+uint8_t CommandController::positionTokenToIndex(const char* token, size_t len) {
+    if (len != 3) return 255;
+    char prefix = token[0];
+    if (prefix >= 'a' && prefix <= 'z') prefix -= 32;
+    if (prefix != 'H') return 255;
+    if (token[1] < '0' || token[1] > '9' || token[2] < '0' || token[2] > '9') return 255;
+
+    uint8_t number = (token[1] - '0') * 10 + (token[2] - '0');
+    if (number < 1 || number > LED_POSITION_COUNT || number > TOUCH_SENSOR_COUNT) return 255;
+    return number - 1;
 }

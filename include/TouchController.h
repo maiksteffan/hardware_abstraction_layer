@@ -73,8 +73,8 @@ public:
     bool readSensorValue(uint8_t sensorIndex, int8_t& value);
     
     // Utilities
-    static uint8_t letterToIndex(char letter);
-    static char indexToLetter(uint8_t index);
+    static uint8_t tokenToIndex(const char* token);
+    static void indexToToken(uint8_t index, char* buffer, size_t bufferSize);
 
 private:
     EventQueue* m_eventQueue;

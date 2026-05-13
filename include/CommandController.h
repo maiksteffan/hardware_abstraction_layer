@@ -5,7 +5,7 @@
  * Handles all serial commands from the Raspberry Pi:
  * 
  * LED Commands:
- *   SHOW <pos> [#id]              - Turn on LED (blue)
+ *   SHOW <pos> [#id]              - Turn on LED (blue), pos = H01-H34
  *   HIDE <pos> [#id]              - Turn off LED
  *   SUCCESS <pos> [#id]           - Play green expansion animation
  *   FAIL <pos> [#id]              - Show red LED (error indicator)
@@ -83,7 +83,7 @@ enum class CommandAction : uint8_t {
 struct ParsedCommand {
     CommandAction action;
     bool hasPosition;
-    char position;
+    char position[POSITION_TOKEN_SIZE];
     uint8_t positionIndex;
     bool hasId;
     uint32_t id;
@@ -157,7 +157,7 @@ private:
     static const char* skipWhitespace(const char* str);
     static const char* findTokenEnd(const char* str);
     static bool strcasecmpN(const char* a, const char* b, size_t len);
-    static uint8_t charToIndex(char c);
+    static uint8_t positionTokenToIndex(const char* token, size_t len);
 };
 
 #endif // COMMAND_CONTROLLER_H

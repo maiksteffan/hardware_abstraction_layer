@@ -39,7 +39,7 @@ enum class EventType : uint8_t {
 struct Event {
     EventType type;
     char action[16];
-    char position;
+    char position[POSITION_TOKEN_SIZE];
     uint32_t commandId;
     char extra[52];
     bool valid;
@@ -62,17 +62,17 @@ public:
     uint8_t count() const;
     
     // Queue event methods (thread-safe, callable from any core)
-    bool queueAck(const char* action, char position = 0, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueDone(const char* action, char position = 0, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueAck(const char* action, const char* position = nullptr, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueDone(const char* action, const char* position = nullptr, uint32_t commandId = COMMAND_ID_NONE);
     bool queueError(const char* reason, uint32_t commandId = COMMAND_ID_NONE);
     bool queueBusy(uint32_t commandId = COMMAND_ID_NONE);
-    bool queueTouched(char position, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueTouchReleased(char position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueTouched(const char* position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueTouchReleased(const char* position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueScanned(const char* sensorList, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueRecalibrated(char position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueRecalibrated(const char* position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
-    bool queueValue(char position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueSensitivity(char position, uint8_t level, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueValue(const char* position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueSensitivity(const char* position, uint8_t level, uint32_t commandId = COMMAND_ID_NONE);
 
 private:
     Event m_events[QUEUE_SIZE_EVENTS];

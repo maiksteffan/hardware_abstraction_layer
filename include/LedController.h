@@ -2,7 +2,7 @@
  * @file LedController.h
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages 25 logical LED positions (A-Y) mapped to two physical LED strips.
+ * Manages 34 logical LED positions (H01-H34) mapped to two physical LED strips.
  * Supports SHOW, HIDE, SUCCESS, BLINK, STOP_BLINK, and SEQUENCE_COMPLETED.
  */
 
@@ -83,10 +83,6 @@ public:
     void showStrip();
     void clearAll();
     
-    // Utilities
-    static uint8_t charToPosition(char c);
-    static char positionToChar(uint8_t pos);
-
 private:
     Adafruit_NeoPixel m_strip1;
     Adafruit_NeoPixel m_strip2;

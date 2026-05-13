@@ -17,7 +17,7 @@ Serial interface for controlling LEDs and reading touch sensors from a Raspberry
 COMMAND [position] [params] [#id]
 ```
 
-- **position**: Letter `A`-`Y` (25 positions)
+- **position**: Hold ID `H01`-`H34` (34 positions)
 - **#id**: Optional ID returned in response for correlation
 
 ## Startup Sequence
@@ -39,7 +39,7 @@ ESP → Pi:   HARDWARE INITIALISED
 If some sensors are missing:
 
 ```
-ESP → Pi:   SENSORS FAILED [A,B,C]     (repeats every 3s until ACK)
+ESP → Pi:   SENSORS FAILED [H01,H02,H03]     (repeats every 3s until ACK)
 Pi  → ESP:  ACK SENSORS FAILED
 ESP → Pi:   HARDWARE INITIALISED
 ```
@@ -58,16 +58,16 @@ as visual-only confirmation.
 
 | Command | Syntax | Response | Description |
 |---------|--------|----------|-------------|
-| SHOW | `SHOW A [#id]` | `ACK SHOW A` | Turn on LED (blue) |
-| HIDE | `HIDE A [#id]` | `ACK HIDE A` | Turn off LED |
+| SHOW | `SHOW H01 [#id]` | `ACK SHOW H01` | Turn on LED (blue) |
+| HIDE | `HIDE H01 [#id]` | `ACK HIDE H01` | Turn off LED |
 | HIDE_ALL | `HIDE_ALL [#id]` | `ACK HIDE_ALL` | Turn off all LEDs |
-| SUCCESS | `SUCCESS A [#id]` | `ACK` → `DONE SUCCESS A` | Green expansion animation |
-| FAIL | `FAIL A [#id]` | `ACK FAIL A` | Red LED (error) |
-| CONTRACT | `CONTRACT A [#id]` | `ACK` → `DONE CONTRACT A` | Contract to center |
-| BLINK | `BLINK A [#id]` | `ACK BLINK A` | Start blinking (green) |
-| STOP_BLINK | `STOP_BLINK A [#id]` | `ACK STOP_BLINK A` | Stop blinking |
-| EXPAND_STEP | `EXPAND_STEP A [#id]` | `ACK EXPAND_STEP A` | Expand by 1 LED each side |
-| CONTRACT_STEP | `CONTRACT_STEP A [#id]` | `ACK CONTRACT_STEP A` | Shrink by 1 LED each side |
+| SUCCESS | `SUCCESS H01 [#id]` | `ACK` → `DONE SUCCESS H01` | Green expansion animation |
+| FAIL | `FAIL H01 [#id]` | `ACK FAIL H01` | Red LED (error) |
+| CONTRACT | `CONTRACT H01 [#id]` | `ACK` → `DONE CONTRACT H01` | Contract to center |
+| BLINK | `BLINK H01 [#id]` | `ACK BLINK H01` | Start blinking (green) |
+| STOP_BLINK | `STOP_BLINK H01 [#id]` | `ACK STOP_BLINK H01` | Stop blinking |
+| EXPAND_STEP | `EXPAND_STEP H01 [#id]` | `ACK EXPAND_STEP H01` | Expand by 1 LED each side |
+| CONTRACT_STEP | `CONTRACT_STEP H01 [#id]` | `ACK CONTRACT_STEP H01` | Shrink by 1 LED each side |
 | SEQUENCE_COMPLETED | `SEQUENCE_COMPLETED [#id]` | `ACK` → `DONE` | Celebration animation |
 | MENUE_CHANGE | `MENUE_CHANGE r,g,b range` | `ACK MENUE_CHANGE` | Color sweep (e.g. `255,0,0 50`) |
 
@@ -75,22 +75,22 @@ as visual-only confirmation.
 
 | Command | Syntax | Response | Description |
 |---------|--------|----------|-------------|
-| EXPECT | `EXPECT A [#id]` | `ACK` → `TOUCHED A` | Wait for touch |
+| EXPECT | `EXPECT H01 [#id]` | `ACK` → `TOUCHED H01` | Wait for touch |
 | EXPECT_ANY | `EXPECT_ANY [#id]` | `ACK` → `TOUCHED <pos>` | Wait for any touch (first hit) |
-| EXPECT_RELEASE | `EXPECT_RELEASE A [#id]` | `ACK` → `TOUCH_RELEASED A` | Wait for release |
+| EXPECT_RELEASE | `EXPECT_RELEASE H01 [#id]` | `ACK` → `TOUCH_RELEASED H01` | Wait for release |
 | CLEAN_QUEUE | `CLEAN_QUEUE [#id]` | `ACK CLEAN_QUEUE` | Clear all pending touch expectations |
-| RECALIBRATE | `RECALIBRATE A [#id]` | `ACK` → `RECALIBRATED A` | Recalibrate sensor |
+| RECALIBRATE | `RECALIBRATE H01 [#id]` | `ACK` → `RECALIBRATED H01` | Recalibrate sensor |
 | RECALIBRATE_ALL | `RECALIBRATE_ALL [#id]` | `ACK` → `RECALIBRATED ALL` | Recalibrate all |
-| VALUE | `VALUE A [#id]` | `VALUE A <delta>` | Get delta (-128 to 127) |
-| SET_SENSITIVITY | `SET_SENSITIVITY A <lvl>` | `ACK SET_SENSITIVITY A` | Set sensitivity (0-7) |
+| VALUE | `VALUE H01 [#id]` | `VALUE H01 <delta>` | Get delta (-128 to 127) |
+| SET_SENSITIVITY | `SET_SENSITIVITY H01 <lvl>` | `ACK SET_SENSITIVITY H01` | Set sensitivity (0-7) |
 
 ### System
 
 | Command | Syntax | Response |
 |---------|--------|----------|
 | PING | `PING [#id]` | `ACK PING` |
-| INFO | `INFO [#id]` | `INFO firmware=2.3.0 protocol=2 board=ESP32_WROOM` |
-| SCAN | `SCAN [#id]` | `SCANNED [A,B,C,...]` |
+| INFO | `INFO [#id]` | `INFO firmware=2.3.0 protocol=3 board=ESP32_WROOM` |
+| SCAN | `SCAN [#id]` | `SCANNED [H01,B,C,...]` |
 
 ## Responses
 
@@ -114,23 +114,23 @@ import serial
 
 ser = serial.Serial('/dev/ttyUSB0', 115200)
 
-# Turn on LED at position A
-ser.write(b'SHOW A #1\n')
-print(ser.readline())  # → ACK SHOW A #1
+# Turn on LED at position H01
+ser.write(b'SHOW H01 #1\n')
+print(ser.readline())  # → ACK SHOW H01 #1
 
-# Wait for user to touch sensor A
-ser.write(b'EXPECT A #2\n')
-print(ser.readline())  # → ACK EXPECT A #2
-print(ser.readline())  # → TOUCHED A #2  (when user touches)
+# Wait for user to touch sensor H01
+ser.write(b'EXPECT H01 #2\n')
+print(ser.readline())  # → ACK EXPECT H01 #2
+print(ser.readline())  # → TOUCHED H01 #2  (when user touches)
 
 # Play success animation
-ser.write(b'SUCCESS A #3\n')
-print(ser.readline())  # → ACK SUCCESS A #3
-print(ser.readline())  # → DONE SUCCESS A #3  (when animation completes)
+ser.write(b'SUCCESS H01 #3\n')
+print(ser.readline())  # → ACK SUCCESS H01 #3
+print(ser.readline())  # → DONE SUCCESS H01 #3  (when animation completes)
 
 # Turn off LED
-ser.write(b'HIDE A #4\n')
-print(ser.readline())  # → ACK HIDE A #4
+ser.write(b'HIDE H01 #4\n')
+print(ser.readline())  # → ACK HIDE H01 #4
 ```
 
 ## Timing
@@ -143,4 +143,4 @@ print(ser.readline())  # → ACK HIDE A #4
 
 ---
 
-*Firmware v2.3.0 · Protocol v2 · ESP32 WROOM*
+*Firmware v2.3.0 · Protocol v3 · ESP32 WROOM*

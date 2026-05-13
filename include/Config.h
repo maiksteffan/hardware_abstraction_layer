@@ -28,7 +28,7 @@
 // ============================================================================
 
 #define FIRMWARE_VERSION "2.3.0"
-#define PROTOCOL_VERSION "2"
+#define PROTOCOL_VERSION "3"
 #define BOARD_TYPE "ESP32_WROOM"
 
 // ============================================================================
@@ -88,10 +88,11 @@ constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY comma
 constexpr uint8_t EVENTS_PER_FLUSH = 5;  // Max events to send per loop iteration
 
 // Serial output buffer
-constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 96;  // Max chars per event message
+constexpr size_t POSITION_TOKEN_SIZE = 4;  // "H34" + null terminator
+constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 160;  // Max chars per event message
 
 // Sensor list buffer (for SCANNED response)
-constexpr size_t SENSOR_LIST_BUFFER_SIZE = 64;
+constexpr size_t SENSOR_LIST_BUFFER_SIZE = 160;
 
 // Serial wait timeout (milliseconds)
 constexpr uint16_t SERIAL_WAIT_TIMEOUT_MS = 3000;
@@ -105,7 +106,7 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // 6. TOUCH SENSING
 // ============================================================================
 
-constexpr uint8_t TOUCH_SENSOR_COUNT = 5;  // Sensors on devboard (A-E)
+constexpr uint8_t TOUCH_SENSOR_COUNT = 34;
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
@@ -123,7 +124,7 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 // ============================================================================
 
 // Strip configuration
-constexpr uint8_t LED_POSITION_COUNT = 25;  // Logical positions (A-Y)
+constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01-H34)
 
 #ifndef LED_STRIP_1_LENGTH
 #define LED_STRIP_1_LENGTH 190
@@ -213,15 +214,17 @@ constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 
 // ============================================================================
-// 10. SENSOR I2C ADDRESSES (A-Y mapping)
+// 10. SENSOR I2C ADDRESSES (H01-H34 mapping)
 // ============================================================================
 
-constexpr uint8_t SENSOR_I2C_ADDRESSES[25] = {
-    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E (FOR DEVBOARD)
-    0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
-    0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O
-    0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // P-T
-    0x2C, 0x3D, 0x08, 0x09, 0x0A   // U-Y
+constexpr uint8_t SENSOR_I2C_ADDRESSES[34] = {
+    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // H01-H05 (old A-E)
+    0x1A, 0x28, 0x29, 0x2A, 0x0E,  // H06-H10 (old F-J)
+    0x0F, 0x18, 0x19, 0x3C, 0x2F,  // H11-H15 (old K-O)
+    0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // H16-H20 (old P-T)
+    0x2C, 0x3D, 0x08, 0x09, 0x0A,  // H21-H25 (old U-Y)
+    0x10, 0x11, 0x12, 0x13, 0x14,  // H26-H30
+    0x15, 0x16, 0x17, 0x1B         // H31-H34
 };
 
 // ============================================================================

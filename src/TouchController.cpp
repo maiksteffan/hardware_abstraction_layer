@@ -203,11 +203,15 @@ void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) con
     
     for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
         if (m_sensors[i].active) {
-            size_t needed = first ? 2 : 3;
+            size_t needed = first ? 3 : 4;
             if (pos + needed > bufferSize) break;
             
             if (!first) buffer[pos++] = ',';
-            buffer[pos++] = indexToLetter(i);
+            char token[POSITION_TOKEN_SIZE];
+            indexToToken(i, token, sizeof(token));
+            for (uint8_t j = 0; token[j] != '\0' && pos + 1 < bufferSize; j++) {
+                buffer[pos++] = token[j];
+            }
             buffer[pos] = '\0';
             first = false;
         }
@@ -248,15 +252,25 @@ bool TouchController::readSensorValue(uint8_t sensorIndex, int8_t& value) {
 // Static Utility Methods
 // ============================================================================
 
-uint8_t TouchController::letterToIndex(char letter) {
-    if (letter >= 'a' && letter <= 'y') letter -= 32;
-    if (letter >= 'A' && letter <= 'Y') return letter - 'A';
-    return 255;
+uint8_t TouchController::tokenToIndex(const char* token) {
+    if (!token) return 255;
+    char prefix = token[0];
+    if (prefix >= 'a' && prefix <= 'z') prefix -= 32;
+    if (prefix != 'H') return 255;
+    if (token[1] < '0' || token[1] > '9' || token[2] < '0' || token[2] > '9' || token[3] != '\0') return 255;
+
+    uint8_t number = (token[1] - '0') * 10 + (token[2] - '0');
+    if (number < 1 || number > TOUCH_SENSOR_COUNT) return 255;
+    return number - 1;
 }
 
-char TouchController::indexToLetter(uint8_t index) {
-    if (index < TOUCH_SENSOR_COUNT) return 'A' + index;
-    return '?';
+void TouchController::indexToToken(uint8_t index, char* buffer, size_t bufferSize) {
+    if (!buffer || bufferSize == 0) return;
+    if (index < TOUCH_SENSOR_COUNT) {
+        snprintf(buffer, bufferSize, "H%02u", index + 1);
+        return;
+    }
+    buffer[0] = '\0';
 }
 
 // ============================================================================
@@ -370,12 +384,13 @@ void TouchController::processDebounce() {
                     sensor.lastReportedTouched = sensor.debouncedTouched;
                     
                     if (m_eventQueue) {
-                        char letter = indexToLetter(i);
+                        char token[POSITION_TOKEN_SIZE];
+                        indexToToken(i, token, sizeof(token));
                         
                         if (sensor.debouncedTouched) {
                             // Check expect-any queue (skip positions already reported)
                             if (m_expectAnyTail != m_expectAnyHead && m_expectAnyQueue[m_expectAnyTail].active && !m_expectAnyUsed[i]) {
-                                m_eventQueue->queueTouched(letter, m_expectAnyQueue[m_expectAnyTail].commandId);
+                                m_eventQueue->queueTouched(token, m_expectAnyQueue[m_expectAnyTail].commandId);
                                 m_expectAnyQueue[m_expectAnyTail].active = false;
                                 m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
                                 m_expectAnyUsed[i] = true;
@@ -386,13 +401,13 @@ void TouchController::processDebounce() {
                                 }
                             }
                             if (m_expectDown[i].active) {
-                                m_eventQueue->queueTouched(letter, m_expectDown[i].commandId);
+                                m_eventQueue->queueTouched(token, m_expectDown[i].commandId);
                                 m_expectDown[i].active = false;
                                 m_expectDown[i].commandId = COMMAND_ID_NONE;
                             }
                         } else {
                             if (m_expectUp[i].active) {
-                                m_eventQueue->queueTouchReleased(letter, m_expectUp[i].commandId);
+                                m_eventQueue->queueTouchReleased(token, m_expectUp[i].commandId);
                                 m_expectUp[i].active = false;
                                 m_expectUp[i].commandId = COMMAND_ID_NONE;
                             }

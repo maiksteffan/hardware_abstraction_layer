@@ -43,8 +43,8 @@ private:
     TouchController& m_touchController;
     HardwareSerial& m_serial;
 
-    // Single status message (e.g. "SENSORS READY" or "SENSORS FAILED [A,B]")
-    char m_statusMsg[64];
+    // Single status message (e.g. "SENSORS READY" or "SENSORS FAILED [H01,H02]")
+    char m_statusMsg[SENSOR_LIST_BUFFER_SIZE + 20];
 
     // Step 1: LED init + sweep animation
     void initLeds();

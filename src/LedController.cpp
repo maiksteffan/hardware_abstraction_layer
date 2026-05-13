@@ -2,47 +2,56 @@
  * @file LedController.cpp
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages 25 logical LED positions (A-Y) mapped to two physical strips.
+ * Manages 34 logical LED positions (H01-H34) mapped to two physical strips.
  * All configurable values are defined in Config.h.
  */
 
 #include "LedController.h"
 
 // ============================================================================
-// LED Position Mappings (A-Y mapped to physical LED indices)
+// LED Position Mappings (H01-H34 mapped to physical LED indices)
 // ============================================================================
 // Each position maps to a strip (1 or 2) and an index on that strip.
 // Modify these values when the physical LED layout changes.
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 7 },  // A
-    { StripId::STRIP2, 19 },  // B
-    { StripId::STRIP2, 31 },  // C
-    { StripId::STRIP2, 43 },  // D
-    { StripId::STRIP2, 55 },  // E
+    { StripId::STRIP2, 7 },   // H01 (old A)
+    { StripId::STRIP2, 19 },  // H02 (old B)
+    { StripId::STRIP2, 31 },  // H03 (old C)
+    { StripId::STRIP2, 43 },  // H04 (old D)
+    { StripId::STRIP2, 55 },  // H05 (old E)
 
     //for the full setup
-    { StripId::STRIP2, 153 },  // F
-    { StripId::STRIP1, 130 },  // G
-    { StripId::STRIP1, 118 },  // H
-    { StripId::STRIP1, 105 },  // I
-    { StripId::STRIP1, 92 },   // J
-    { StripId::STRIP2, 105 },  // K
-    { StripId::STRIP2, 118 },  // L
-    { StripId::STRIP2, 130 },  // M
-    { StripId::STRIP1, 55 },   // N
-    { StripId::STRIP1, 67 },   // O
-    { StripId::STRIP1, 79 },   // P
-    { StripId::STRIP2, 79 },   // Q
-    { StripId::STRIP2, 67 },   // R
-    { StripId::STRIP2, 55 },   // S
-    { StripId::STRIP1, 34 },   // T
-    { StripId::STRIP1, 22 },   // U
-    { StripId::STRIP1, 10 },   // V
-    { StripId::STRIP2, 10 },   // W
-    { StripId::STRIP2, 22 },   // X
-    { StripId::STRIP2, 34 }    // Y
+    { StripId::STRIP2, 153 }, // H06 (old F)
+    { StripId::STRIP1, 130 }, // H07 (old G)
+    { StripId::STRIP1, 118 }, // H08 (old H)
+    { StripId::STRIP1, 105 }, // H09 (old I)
+    { StripId::STRIP1, 92 },  // H10 (old J)
+    { StripId::STRIP2, 105 }, // H11 (old K)
+    { StripId::STRIP2, 118 }, // H12 (old L)
+    { StripId::STRIP2, 130 }, // H13 (old M)
+    { StripId::STRIP1, 55 },  // H14 (old N)
+    { StripId::STRIP1, 67 },  // H15 (old O)
+    { StripId::STRIP1, 79 },  // H16 (old P)
+    { StripId::STRIP2, 79 },  // H17 (old Q)
+    { StripId::STRIP2, 67 },  // H18 (old R)
+    { StripId::STRIP2, 55 },  // H19 (old S)
+    { StripId::STRIP1, 34 },  // H20 (old T)
+    { StripId::STRIP1, 22 },  // H21 (old U)
+    { StripId::STRIP1, 10 },  // H22 (old V)
+    { StripId::STRIP2, 10 },  // H23 (old W)
+    { StripId::STRIP2, 22 },  // H24 (old X)
+    { StripId::STRIP2, 34 },  // H25 (old Y)
+    { StripId::STRIP1, 142 }, // H26
+    { StripId::STRIP1, 154 }, // H27
+    { StripId::STRIP1, 166 }, // H28
+    { StripId::STRIP1, 178 }, // H29
+    { StripId::STRIP2, 142 }, // H30
+    { StripId::STRIP2, 154 }, // H31
+    { StripId::STRIP2, 166 }, // H32
+    { StripId::STRIP2, 178 }, // H33
+    { StripId::STRIP1, 46 }   // H34
 };
 
 // ============================================================================
@@ -400,17 +409,6 @@ bool LedController::isContractComplete(uint8_t position) const {
 bool LedController::isBlinking(uint8_t position) const {
     if (position >= LED_POSITION_COUNT) return false;
     return m_positions[position].state == PositionState::BLINKING;
-}
-
-uint8_t LedController::charToPosition(char c) {
-    if (c >= 'a' && c <= 'y') c = c - 'a' + 'A';
-    if (c >= 'A' && c <= 'Y') return c - 'A';
-    return 255;
-}
-
-char LedController::positionToChar(uint8_t pos) {
-    if (pos < LED_POSITION_COUNT) return 'A' + pos;
-    return '?';
 }
 
 // ============================================================================
