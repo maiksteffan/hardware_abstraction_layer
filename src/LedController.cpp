@@ -2,47 +2,58 @@
  * @file LedController.cpp
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages 25 logical LED positions (A-Y) mapped to two physical strips.
+ * Manages LED_POSITION_COUNT (34) logical LED positions (H01-H34) mapped to two physical strips.
  * All configurable values are defined in Config.h.
  */
 
 #include "LedController.h"
 
 // ============================================================================
-// LED Position Mappings (A-Y mapped to physical LED indices)
+// LED Position Mappings (H01-H34 mapped to physical LED indices)
 // ============================================================================
 // Each position maps to a strip (1 or 2) and an index on that strip.
-// Modify these values when the physical LED layout changes.
+//
+// TODO (user): set the correct {strip, ledIndex} for each input H01..H34 to
+// match the real wiring. Placeholder values below all point to LED 0 of
+// strip 1; the firmware will compile and run but every input will light up
+// the same physical LED until you fill in the real layout.
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 7 },  // A
-    { StripId::STRIP2, 19 },  // B
-    { StripId::STRIP2, 31 },  // C
-    { StripId::STRIP2, 43 },  // D
-    { StripId::STRIP2, 55 },  // E
-
-    //for the full setup
-    { StripId::STRIP2, 153 },  // F
-    { StripId::STRIP1, 130 },  // G
-    { StripId::STRIP1, 118 },  // H
-    { StripId::STRIP1, 105 },  // I
-    { StripId::STRIP1, 92 },   // J
-    { StripId::STRIP2, 105 },  // K
-    { StripId::STRIP2, 118 },  // L
-    { StripId::STRIP2, 130 },  // M
-    { StripId::STRIP1, 55 },   // N
-    { StripId::STRIP1, 67 },   // O
-    { StripId::STRIP1, 79 },   // P
-    { StripId::STRIP2, 79 },   // Q
-    { StripId::STRIP2, 67 },   // R
-    { StripId::STRIP2, 55 },   // S
-    { StripId::STRIP1, 34 },   // T
-    { StripId::STRIP1, 22 },   // U
-    { StripId::STRIP1, 10 },   // V
-    { StripId::STRIP2, 10 },   // W
-    { StripId::STRIP2, 22 },   // X
-    { StripId::STRIP2, 34 }    // Y
+    { StripId::STRIP1, 0 },   // H01
+    { StripId::STRIP1, 0 },   // H02
+    { StripId::STRIP1, 0 },   // H03
+    { StripId::STRIP1, 0 },   // H04
+    { StripId::STRIP1, 0 },   // H05
+    { StripId::STRIP1, 0 },   // H06
+    { StripId::STRIP1, 0 },   // H07
+    { StripId::STRIP1, 0 },   // H08
+    { StripId::STRIP1, 0 },   // H09
+    { StripId::STRIP1, 0 },   // H10
+    { StripId::STRIP1, 0 },   // H11
+    { StripId::STRIP1, 0 },   // H12
+    { StripId::STRIP1, 0 },   // H13
+    { StripId::STRIP1, 0 },   // H14
+    { StripId::STRIP1, 0 },   // H15
+    { StripId::STRIP1, 0 },   // H16
+    { StripId::STRIP1, 0 },   // H17
+    { StripId::STRIP1, 0 },   // H18
+    { StripId::STRIP1, 0 },   // H19
+    { StripId::STRIP1, 0 },   // H20
+    { StripId::STRIP1, 0 },   // H21
+    { StripId::STRIP1, 0 },   // H22
+    { StripId::STRIP1, 0 },   // H23
+    { StripId::STRIP1, 0 },   // H24
+    { StripId::STRIP1, 0 },   // H25
+    { StripId::STRIP1, 0 },   // H26
+    { StripId::STRIP1, 0 },   // H27
+    { StripId::STRIP1, 0 },   // H28
+    { StripId::STRIP1, 0 },   // H29
+    { StripId::STRIP1, 0 },   // H30
+    { StripId::STRIP1, 0 },   // H31
+    { StripId::STRIP1, 0 },   // H32
+    { StripId::STRIP1, 0 },   // H33
+    { StripId::STRIP1, 0 }    // H34
 };
 
 // ============================================================================
@@ -400,17 +411,6 @@ bool LedController::isContractComplete(uint8_t position) const {
 bool LedController::isBlinking(uint8_t position) const {
     if (position >= LED_POSITION_COUNT) return false;
     return m_positions[position].state == PositionState::BLINKING;
-}
-
-uint8_t LedController::charToPosition(char c) {
-    if (c >= 'a' && c <= 'y') c = c - 'a' + 'A';
-    if (c >= 'A' && c <= 'Y') return c - 'A';
-    return 255;
-}
-
-char LedController::positionToChar(uint8_t pos) {
-    if (pos < LED_POSITION_COUNT) return 'A' + pos;
-    return '?';
 }
 
 // ============================================================================

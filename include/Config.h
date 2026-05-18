@@ -28,7 +28,7 @@
 // ============================================================================
 
 #define FIRMWARE_VERSION "2.3.0"
-#define PROTOCOL_VERSION "2"
+#define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #define BOARD_TYPE "ESP32_WROOM"
 
 // ============================================================================
@@ -88,10 +88,12 @@ constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY comma
 constexpr uint8_t EVENTS_PER_FLUSH = 5;  // Max events to send per loop iteration
 
 // Serial output buffer
-constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 96;  // Max chars per event message
+// Must fit "SCANNED [H01,H02,...,H34] #4294967295\n" = ~156 chars worst case.
+constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 224;  // Max chars per event message
 
 // Sensor list buffer (for SCANNED response)
-constexpr size_t SENSOR_LIST_BUFFER_SIZE = 64;
+// Holds up to INPUT_COUNT (34) tokens of 3 chars + commas + brackets/null.
+constexpr size_t SENSOR_LIST_BUFFER_SIZE = 160;
 
 // Serial wait timeout (milliseconds)
 constexpr uint16_t SERIAL_WAIT_TIMEOUT_MS = 3000;
@@ -105,7 +107,13 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // 6. TOUCH SENSING
 // ============================================================================
 
-constexpr uint8_t TOUCH_SENSOR_COUNT = 5;  // Sensors on devboard (A-E)
+constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
+constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
+constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
+
+// Length of a position string including null terminator (e.g. "H01\0")
+constexpr uint8_t POSITION_STRING_LENGTH = 4;
+
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
@@ -123,7 +131,7 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 // ============================================================================
 
 // Strip configuration
-constexpr uint8_t LED_POSITION_COUNT = 25;  // Logical positions (A-Y)
+constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
 
 #ifndef LED_STRIP_1_LENGTH
 #define LED_STRIP_1_LENGTH 190
@@ -180,7 +188,7 @@ constexpr uint8_t COLOR_OFF_B = 0;
 // 9. I2C CONFIGURATION
 // ============================================================================
 
-constexpr uint32_t I2C_CLOCK_SPEED_HZ = 400000;  // 400kHz Fast Mode
+constexpr uint32_t I2C_CLOCK_SPEED_HZ = 100000;  // 400kHz Fast Mode
 constexpr uint8_t I2C_RETRY_COUNT = 3;
 constexpr uint16_t I2C_RETRY_DELAY_US = 100;
 
@@ -213,15 +221,40 @@ constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 
 // ============================================================================
-// 10. SENSOR I2C ADDRESSES (A-Y mapping)
+// 10. SENSOR I2C ADDRESSES (one per physical CAP1188 chip)
 // ============================================================================
 
-constexpr uint8_t SENSOR_I2C_ADDRESSES[25] = {
-    0x1F, 0x1E, 0x1D, 0x1C, 0x3F,  // A-E (FOR DEVBOARD)
-    0x1A, 0x28, 0x29, 0x2A, 0x0E,  // F-J
-    0x0F, 0x18, 0x19, 0x3C, 0x2F,  // K-O
-    0x38, 0x0D, 0x0C, 0x0B, 0x3E,  // P-T
-    0x2C, 0x3D, 0x08, 0x09, 0x0A   // U-Y
+constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
+    0x28, 0x29, 0x2A, 0x2B, 0x2C
+};
+
+// ============================================================================
+// 10b. INPUT MAPPING: H01..H34  ->  (sensor_index, channel)
+// ============================================================================
+// sensor_index: 0..TOUCH_SENSOR_COUNT-1 (index into SENSOR_I2C_ADDRESSES)
+// channel:      0..TOUCH_CHANNELS_PER_SENSOR-1 (CAP1188 CS1..CS7)
+//
+// EDIT THIS TABLE TO MATCH YOUR PHYSICAL WIRING.
+// Entry i corresponds to input "H{i+1:02}" (so INPUT_MAPPINGS[0] is H01).
+// ============================================================================
+
+struct InputMapping {
+    uint8_t sensorIndex;   // 0..TOUCH_SENSOR_COUNT-1
+    uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1
+};
+
+constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
+    // H01..H07  -> sensor 0, channels 0..6
+    {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6},
+    // H08..H14  -> sensor 1, channels 0..6
+    {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, {1,6},
+    // H15..H21  -> sensor 2, channels 0..6
+    {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6},
+    // H22..H28  -> sensor 3, channels 0..6
+    {3,0}, {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {3,6},
+    // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)
+    {4,0}, {4,1}, {4,2}, {4,3}, {4,4}, {4,5}
+    // TODO (user): edit this default layout to match the real wiring.
 };
 
 // ============================================================================

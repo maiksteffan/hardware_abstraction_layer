@@ -135,7 +135,7 @@ bool CommandController::extractLine() {
 bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.action = CommandAction::INVALID;
     cmd.hasPosition = false;
-    cmd.position = 0;
+    cmd.position[0] = '\0';
     cmd.positionIndex = 255;
     cmd.hasId = false;
     cmd.id = COMMAND_ID_NONE;
@@ -220,8 +220,11 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
             return false;
         }
         
-        cmd.position = (*p >= 'a' && *p <= 'z') ? (*p - 32) : *p;
-        cmd.positionIndex = charToIndex(cmd.position);
+        const char* posStart = p;
+        const char* posEnd = findTokenEnd(p);
+        size_t posLen = posEnd - posStart;
+        
+        cmd.positionIndex = parsePosition(posStart, posLen, cmd.position);
         
         if (cmd.positionIndex == 255) {
             m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
@@ -229,7 +232,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         }
         
         cmd.hasPosition = true;
-        p = skipWhitespace(p + 1);
+        p = skipWhitespace(posEnd);
     }
     
     // Parse extra numeric value if needed (e.g., sensitivity level)
@@ -507,7 +510,8 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::SCAN:
             if (m_touchController) {
-                char sensorList[64];
+                // Must be large enough for all 34 inputs: "H01,H02,...,H34" = 135 chars + null.
+                char sensorList[SENSOR_LIST_BUFFER_SIZE];
                 m_touchController->buildActiveSensorList(sensorList, sizeof(sensorList));
                 m_eventQueue.queueScanned(sensorList, cmdId);
             } else {
@@ -638,8 +642,31 @@ bool CommandController::strcasecmpN(const char* a, const char* b, size_t len) {
     return true;
 }
 
-uint8_t CommandController::charToIndex(char c) {
-    if (c >= 'a' && c <= 'y') c -= 32;
-    if (c >= 'A' && c <= 'Y') return c - 'A';
-    return 255;
+uint8_t CommandController::parsePosition(const char* token, size_t tokenLen, char outStr[POSITION_STRING_LENGTH]) {
+    if (tokenLen != 3) return 255;
+    char h = token[0];
+    if (h != 'H' && h != 'h') return 255;
+    char d1 = token[1];
+    char d2 = token[2];
+    if (d1 < '0' || d1 > '9') return 255;
+    if (d2 < '0' || d2 > '9') return 255;
+    uint8_t value = (uint8_t)((d1 - '0') * 10 + (d2 - '0'));
+    if (value < 1 || value > INPUT_COUNT) return 255;
+    outStr[0] = 'H';
+    outStr[1] = d1;
+    outStr[2] = d2;
+    outStr[3] = '\0';
+    return (uint8_t)(value - 1);
+}
+
+void CommandController::indexToPosition(uint8_t index, char outStr[POSITION_STRING_LENGTH]) {
+    if (index >= INPUT_COUNT) {
+        outStr[0] = '\0';
+        return;
+    }
+    uint8_t value = (uint8_t)(index + 1);
+    outStr[0] = 'H';
+    outStr[1] = (char)('0' + (value / 10));
+    outStr[2] = (char)('0' + (value % 10));
+    outStr[3] = '\0';
 }

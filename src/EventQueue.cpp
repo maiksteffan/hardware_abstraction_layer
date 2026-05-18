@@ -98,27 +98,40 @@ uint8_t EventQueue::count() const {
 }
 
 // ============================================================================
+// Internal helpers
+// ============================================================================
+
+static inline void copyPosition(char dst[POSITION_STRING_LENGTH], const char* src) {
+    if (src && src[0]) {
+        strncpy(dst, src, POSITION_STRING_LENGTH - 1);
+        dst[POSITION_STRING_LENGTH - 1] = '\0';
+    } else {
+        dst[0] = '\0';
+    }
+}
+
+// ============================================================================
 // Event Queueing Methods
 // ============================================================================
 
-bool EventQueue::queueAck(const char* action, char position, uint32_t commandId) {
+bool EventQueue::queueAck(const char* action, const char* position, uint32_t commandId) {
     Event event;
     event.type = EventType::ACK;
     strncpy(event.action, action, sizeof(event.action) - 1);
     event.action[sizeof(event.action) - 1] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
     return enqueue(event);
 }
 
-bool EventQueue::queueDone(const char* action, char position, uint32_t commandId) {
+bool EventQueue::queueDone(const char* action, const char* position, uint32_t commandId) {
     Event event;
     event.type = EventType::DONE;
     strncpy(event.action, action, sizeof(event.action) - 1);
     event.action[sizeof(event.action) - 1] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
@@ -129,7 +142,7 @@ bool EventQueue::queueError(const char* reason, uint32_t commandId) {
     Event event;
     event.type = EventType::ERR;
     event.action[0] = '\0';
-    event.position = 0;
+    event.position[0] = '\0';
     event.commandId = commandId;
     strncpy(event.extra, reason, sizeof(event.extra) - 1);
     event.extra[sizeof(event.extra) - 1] = '\0';
@@ -141,29 +154,29 @@ bool EventQueue::queueBusy(uint32_t commandId) {
     Event event;
     event.type = EventType::BUSY;
     event.action[0] = '\0';
-    event.position = 0;
+    event.position[0] = '\0';
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
     return enqueue(event);
 }
 
-bool EventQueue::queueTouched(char position, uint32_t commandId) {
+bool EventQueue::queueTouched(const char* position, uint32_t commandId) {
     Event event;
     event.type = EventType::TOUCHED;
     event.action[0] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
     return enqueue(event);
 }
 
-bool EventQueue::queueTouchReleased(char position, uint32_t commandId) {
+bool EventQueue::queueTouchReleased(const char* position, uint32_t commandId) {
     Event event;
     event.type = EventType::TOUCH_RELEASED;
     event.action[0] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
@@ -174,7 +187,7 @@ bool EventQueue::queueScanned(const char* sensorList, uint32_t commandId) {
     Event event;
     event.type = EventType::SCANNED;
     event.action[0] = '\0';
-    event.position = 0;
+    event.position[0] = '\0';
     event.commandId = commandId;
     strncpy(event.extra, sensorList, sizeof(event.extra) - 1);
     event.extra[sizeof(event.extra) - 1] = '\0';
@@ -182,11 +195,11 @@ bool EventQueue::queueScanned(const char* sensorList, uint32_t commandId) {
     return enqueue(event);
 }
 
-bool EventQueue::queueRecalibrated(char position, uint32_t commandId) {
+bool EventQueue::queueRecalibrated(const char* position, uint32_t commandId) {
     Event event;
     event.type = EventType::RECALIBRATED;
     event.action[0] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
@@ -197,18 +210,18 @@ bool EventQueue::queueInfo(uint32_t commandId) {
     Event event;
     event.type = EventType::INFO;
     event.action[0] = '\0';
-    event.position = 0;
+    event.position[0] = '\0';
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
     return enqueue(event);
 }
 
-bool EventQueue::queueValue(char position, int8_t value, uint32_t commandId) {
+bool EventQueue::queueValue(const char* position, int8_t value, uint32_t commandId) {
     Event event;
     event.type = EventType::VALUE;
     event.action[0] = '\0';
-    event.position = position;
+    copyPosition(event.position, position);
     event.commandId = commandId;
     snprintf(event.extra, sizeof(event.extra), "%d", value);
     event.valid = true;
@@ -248,15 +261,15 @@ void EventQueue::sendEvent(const Event& event) {
     switch (event.type) {
         case EventType::ACK:
             length = snprintf(buffer, sizeof(buffer), "ACK %s", event.action);
-            if (event.position != 0) {
-                length += snprintf(buffer + length, sizeof(buffer) - length, " %c", event.position);
+            if (event.position[0] != '\0') {
+                length += snprintf(buffer + length, sizeof(buffer) - length, " %s", event.position);
             }
             break;
             
         case EventType::DONE:
             length = snprintf(buffer, sizeof(buffer), "DONE %s", event.action);
-            if (event.position != 0) {
-                length += snprintf(buffer + length, sizeof(buffer) - length, " %c", event.position);
+            if (event.position[0] != '\0') {
+                length += snprintf(buffer + length, sizeof(buffer) - length, " %s", event.position);
             }
             break;
             
@@ -269,11 +282,11 @@ void EventQueue::sendEvent(const Event& event) {
             break;
             
         case EventType::TOUCHED:
-            length = snprintf(buffer, sizeof(buffer), "TOUCHED %c", event.position);
+            length = snprintf(buffer, sizeof(buffer), "TOUCHED %s", event.position);
             break;
             
         case EventType::TOUCH_RELEASED:
-            length = snprintf(buffer, sizeof(buffer), "TOUCH_RELEASED %c", event.position);
+            length = snprintf(buffer, sizeof(buffer), "TOUCH_RELEASED %s", event.position);
             break;
             
         case EventType::SCANNED:
@@ -281,10 +294,10 @@ void EventQueue::sendEvent(const Event& event) {
             break;
             
         case EventType::RECALIBRATED:
-            if (event.position == 0) {
+            if (event.position[0] == '\0') {
                 length = snprintf(buffer, sizeof(buffer), "RECALIBRATED ALL");
             } else {
-                length = snprintf(buffer, sizeof(buffer), "RECALIBRATED %c", event.position);
+                length = snprintf(buffer, sizeof(buffer), "RECALIBRATED %s", event.position);
             }
             break;
             
@@ -294,7 +307,7 @@ void EventQueue::sendEvent(const Event& event) {
             break;
             
         case EventType::VALUE:
-            length = snprintf(buffer, sizeof(buffer), "VALUE %c %s", event.position, event.extra);
+            length = snprintf(buffer, sizeof(buffer), "VALUE %s %s", event.position, event.extra);
             break;
     }
     

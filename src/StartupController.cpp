@@ -112,13 +112,49 @@ void StartupController::initSensors() {
         }
     }
 
+    // ---- Emit diagnostics on the wire (Pi ignores unknown keywords) -------
+    // I²C bus scan
+    {
+        char scanBuf[160];
+        uint8_t n = m_touchController.scanI2CBus(scanBuf, sizeof(scanBuf));
+        m_serial.print("DIAG I2C_SCAN count=");
+        m_serial.print(n);
+        m_serial.print(" devices=[");
+        m_serial.print(scanBuf);
+        m_serial.println("]");
+    }
+    // Per-sensor init outcome (re-runs init once more to capture the reason
+    // each sensor passed/failed). diagInitSensor() updates the active flag
+    // accordingly, so this also acts as a final init pass.
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        char diag[96];
+        m_touchController.diagInitSensor(s, diag, sizeof(diag));
+        m_serial.print("DIAG ");
+        m_serial.println(diag);
+    }
+
+    // Recount active inputs from the active-list builder (source of truth).
+    uint8_t activeCount = 0;
+    {
+        char tmp[SENSOR_LIST_BUFFER_SIZE];
+        m_touchController.buildActiveSensorList(tmp, sizeof(tmp));
+        if (tmp[0] != '\0') {
+            activeCount = 1;
+            for (const char* p = tmp; *p; ++p) if (*p == ',') activeCount++;
+        }
+    }
+    // If every logical input is covered we still report READY, otherwise FAILED.
+    allFound = (activeCount >= INPUT_COUNT);
+
     if (allFound) {
         strncpy(m_statusMsg, "SENSORS READY", sizeof(m_statusMsg) - 1);
         m_statusMsg[sizeof(m_statusMsg) - 1] = '\0';
     } else {
-        char sensorList[SENSOR_LIST_BUFFER_SIZE];
-        m_touchController.buildActiveSensorList(sensorList, sizeof(sensorList));
-        snprintf(m_statusMsg, sizeof(m_statusMsg), "SENSORS FAILED [%s]", sensorList);
+        // Pi protocol: bracketed list contains the *active* inputs, not failed.
+        // See pi5_programm/.../esp32_protocol.py::_handle_sensors().
+        char activeList[SENSOR_LIST_BUFFER_SIZE];
+        m_touchController.buildActiveSensorList(activeList, sizeof(activeList));
+        snprintf(m_statusMsg, sizeof(m_statusMsg), "SENSORS FAILED [%s]", activeList);
     }
 }
 

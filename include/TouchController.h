@@ -1,7 +1,11 @@
 /**
  * @file TouchController.h
- * @brief Touch sensor controller for 25 CAP1188 capacitive touch sensors over I2C
- * 
+ * @brief Touch input controller for CAP1188 capacitive sensors over I2C
+ *
+ * Hardware: TOUCH_SENSOR_COUNT physical CAP1188 chips, each exposing up to
+ * TOUCH_CHANNELS_PER_SENSOR channels. The firmware exposes INPUT_COUNT (34)
+ * logical inputs named H01..H34 via the INPUT_MAPPINGS[] table in Config.h.
+ *
  * Protocol v2: Event-driven architecture
  * - Always polls sensors
  * - Debounces touch inputs
@@ -21,8 +25,16 @@ class EventQueue;
 // Types
 // ============================================================================
 
-struct TouchSensorState {
-    bool active;
+// State for one physical CAP1188 chip
+struct PhysicalSensor {
+    bool active;          // I2C init succeeded
+    uint8_t enableMask;   // OR of (1 << channel) for every input mapped to this sensor
+    uint8_t lastStatus;   // Last-read SENSOR_INPUT_STATUS register (cached per poll cycle)
+    bool statusValid;     // Whether lastStatus holds a fresh value
+};
+
+// State for one logical input (H01..H34)
+struct TouchInputState {
     bool currentTouched;
     bool debouncedTouched;
     bool lastReportedTouched;
@@ -46,50 +58,66 @@ public:
     bool begin();
     void tick();
     
-    // Recalibration
-    bool recalibrate(uint8_t sensorIndex);
+    // Recalibration (inputIndex = 0..INPUT_COUNT-1)
+    bool recalibrate(uint8_t inputIndex);
     void recalibrateAll();
     
-    // Sensitivity control
-    bool setSensitivity(uint8_t sensorIndex, uint8_t level);
+    // Sensitivity control. NOTE: CAP1188 sensitivity is GLOBAL per chip, so
+    // setting it on any input affects every other input mapped to the same
+    // physical sensor.
+    bool setSensitivity(uint8_t inputIndex, uint8_t level);
     
-    // Expectations
-    void setExpectDown(uint8_t sensorIndex, uint32_t commandId);
-    void setExpectUp(uint8_t sensorIndex, uint32_t commandId);
+    // Expectations (indexed by input 0..INPUT_COUNT-1)
+    void setExpectDown(uint8_t inputIndex, uint32_t commandId);
+    void setExpectUp(uint8_t inputIndex, uint32_t commandId);
     void setExpectAny(uint32_t commandId);
-    void clearExpectDown(uint8_t sensorIndex);
-    void clearExpectUp(uint8_t sensorIndex);
+    void clearExpectDown(uint8_t inputIndex);
+    void clearExpectUp(uint8_t inputIndex);
     void clearExpectAny();
     
     // State queries
-    bool isSensorActive(uint8_t sensorIndex) const;
-    bool isTouched(uint8_t sensorIndex) const;
-    uint8_t getActiveSensorCount() const;
+    bool isInputActive(uint8_t inputIndex) const;     // input's parent sensor is active
+    bool isTouched(uint8_t inputIndex) const;
+    uint8_t getActiveSensorCount() const;             // number of physical chips initialized
     void buildActiveSensorList(char* buffer, size_t bufferSize) const;
-    
-    // Sensor value reading
-    bool readSensorValue(uint8_t sensorIndex, int8_t& value);
-    
-    // Utilities
-    static uint8_t letterToIndex(char letter);
-    static char indexToLetter(uint8_t index);
+    void buildFailedInputList(char* buffer, size_t bufferSize) const;  // H## inputs whose parent sensor failed init
+
+    // ---- Diagnostics (used by StartupController to emit DIAG lines) -------
+    // Scan the full 7-bit address range and write found addresses (hex) into
+    // buffer as e.g. "0x28,0x29,0x2A". Returns the number of devices found.
+    // Wire must already be initialized.
+    uint8_t scanI2CBus(char* buffer, size_t bufferSize) const;
+
+    // Per-sensor init diagnostic. Performs the same init sequence as
+    // initSensor() but writes a human-readable result to outDiag.
+    // Examples:
+    //   "S0@0x28 OK pid=0x50"
+    //   "S0@0x28 FAIL probe"
+    //   "S0@0x28 FAIL pid_read"
+    //   "S0@0x28 FAIL pid=0x42"
+    //   "S0@0x28 FAIL write_mtblk"
+    // Returns true iff sensor is now considered active.
+    bool diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t diagSize);
+
+    // Sensor value reading (delta count for the input's CAP1188 channel)
+    bool readSensorValue(uint8_t inputIndex, int8_t& value);
 
 private:
     EventQueue* m_eventQueue;
-    TouchSensorState m_sensors[TOUCH_SENSOR_COUNT];
-    ExpectState m_expectDown[TOUCH_SENSOR_COUNT];
-    ExpectState m_expectUp[TOUCH_SENSOR_COUNT];
+    PhysicalSensor m_sensors[TOUCH_SENSOR_COUNT];
+    TouchInputState m_inputs[INPUT_COUNT];
+    ExpectState m_expectDown[INPUT_COUNT];
+    ExpectState m_expectUp[INPUT_COUNT];
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
-    bool m_expectAnyUsed[TOUCH_SENSOR_COUNT];  // Positions already reported by EXPECT_ANY
+    bool m_expectAnyUsed[INPUT_COUNT];  // Inputs already reported by EXPECT_ANY
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
     
-    bool initSensor(uint8_t address);
+    bool initSensor(uint8_t sensorIndex);
     bool readRegister(uint8_t address, uint8_t reg, uint8_t& value);
     bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
-    int8_t readRawTouch(uint8_t address);  // Returns -1 on error, 0 = not touched, 1 = touched
     void pollSensors();
     void processDebounce();
 };

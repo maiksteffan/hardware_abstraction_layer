@@ -79,8 +79,8 @@ enum class CommandAction : uint8_t {
 struct ParsedCommand {
     CommandAction action;
     bool hasPosition;
-    char position;
-    uint8_t positionIndex;
+    char position[POSITION_STRING_LENGTH];  // canonical "H01".."H34\0" (empty if !hasPosition)
+    uint8_t positionIndex;                  // 0..INPUT_COUNT-1 (255 = invalid)
     bool hasId;
     uint32_t id;
     uint8_t extraValue;  // For commands that need an extra numeric parameter (e.g., sensitivity level)
@@ -153,7 +153,14 @@ private:
     static const char* skipWhitespace(const char* str);
     static const char* findTokenEnd(const char* str);
     static bool strcasecmpN(const char* a, const char* b, size_t len);
-    static uint8_t charToIndex(char c);
+
+public:
+    // Position string helpers (canonical form: "H01".."H34")
+    // parsePosition() accepts 'H'/'h' + 2 digits, value 1..INPUT_COUNT.
+    // Returns input index (0..INPUT_COUNT-1) on success, 255 on failure.
+    // outStr (size POSITION_STRING_LENGTH) is written with the canonical upper-case form on success.
+    static uint8_t parsePosition(const char* token, size_t tokenLen, char outStr[POSITION_STRING_LENGTH]);
+    static void indexToPosition(uint8_t index, char outStr[POSITION_STRING_LENGTH]);
 };
 
 #endif // COMMAND_CONTROLLER_H

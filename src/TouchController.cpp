@@ -1,9 +1,17 @@
 /**
  * @file TouchController.cpp
- * @brief Implementation of touch sensor controller for CAP1188 sensors
+ * @brief Implementation of multi-channel CAP1188 touch input controller
+ *
+ * Indexing model:
+ *   - "sensor index" (0..TOUCH_SENSOR_COUNT-1) addresses one physical CAP1188 chip.
+ *   - "input index"  (0..INPUT_COUNT-1)        addresses one logical H01..H34 input.
+ *   - INPUT_MAPPINGS[i] = {sensorIndex, channel} resolves input i to hardware.
+ *
+ * Public API methods take input indices (NOT sensor indices).
  */
 
 #include "TouchController.h"
+#include "CommandController.h"   // for indexToPosition()
 #include "EventQueue.h"
 
 // ============================================================================
@@ -12,29 +20,32 @@
 
 TouchController::TouchController()
     : m_eventQueue(nullptr)
+    , m_expectAnyHead(0)
+    , m_expectAnyTail(0)
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
 {
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        m_sensors[i].active = false;
-        m_sensors[i].currentTouched = false;
-        m_sensors[i].debouncedTouched = false;
-        m_sensors[i].lastReportedTouched = false;
-        m_sensors[i].lastChangeTime = 0;
-        
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        m_sensors[s].active = false;
+        m_sensors[s].enableMask = 0;
+        m_sensors[s].lastStatus = 0;
+        m_sensors[s].statusValid = false;
+    }
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        m_inputs[i].currentTouched = false;
+        m_inputs[i].debouncedTouched = false;
+        m_inputs[i].lastReportedTouched = false;
+        m_inputs[i].lastChangeTime = 0;
+
         m_expectDown[i].active = false;
         m_expectDown[i].commandId = COMMAND_ID_NONE;
         m_expectUp[i].active = false;
         m_expectUp[i].commandId = COMMAND_ID_NONE;
     }
-    
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
     }
-    m_expectAnyHead = 0;
-    m_expectAnyTail = 0;
-    
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
 
@@ -51,100 +62,116 @@ bool TouchController::begin() {
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     Wire.setClock(I2C_CLOCK_SPEED_HZ);
     delay(100);
-    
-    m_activeSensorCount = 0;
-    
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        uint8_t address = SENSOR_I2C_ADDRESSES[i];
-        
-        if (initSensor(address)) {
-            m_sensors[i].active = true;
-            m_activeSensorCount++;
-        } else {
-            m_sensors[i].active = false;
+
+    // Reset sensor state
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        m_sensors[s].active = false;
+        m_sensors[s].enableMask = 0;
+        m_sensors[s].lastStatus = 0;
+        m_sensors[s].statusValid = false;
+    }
+
+    // Build per-sensor enable mask from INPUT_MAPPINGS
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
+        uint8_t ch = INPUT_MAPPINGS[i].channel;
+        if (s < TOUCH_SENSOR_COUNT && ch < 8) {
+            m_sensors[s].enableMask |= (uint8_t)(1 << ch);
         }
-        
-        m_sensors[i].currentTouched = false;
-        m_sensors[i].debouncedTouched = false;
-        m_sensors[i].lastReportedTouched = false;
-        m_sensors[i].lastChangeTime = 0;
-        
+    }
+
+    // Initialize each physical sensor
+    m_activeSensorCount = 0;
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        if (initSensor(s)) {
+            m_sensors[s].active = true;
+            m_activeSensorCount++;
+        }
         delay(10);
     }
-    
+
+    // Reset input state
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        m_inputs[i].currentTouched = false;
+        m_inputs[i].debouncedTouched = false;
+        m_inputs[i].lastReportedTouched = false;
+        m_inputs[i].lastChangeTime = 0;
+    }
+
     return m_activeSensorCount > 0;
 }
 
 void TouchController::tick() {
     uint32_t now = millis();
-    
+
     if (now - m_lastPollTime < TOUCH_POLL_INTERVAL_MS) {
         return;
     }
     m_lastPollTime = now;
-    
+
     pollSensors();
     processDebounce();
 }
 
-bool TouchController::recalibrate(uint8_t sensorIndex) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    if (!m_sensors[sensorIndex].active) return false;
-    
-    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
-    return writeRegister(address, CAP1188_REG_CALIBRATION_ACTIVE, CAP1188_CS1_BIT_MASK);
+bool TouchController::recalibrate(uint8_t inputIndex) {
+    if (inputIndex >= INPUT_COUNT) return false;
+    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
+    uint8_t ch = INPUT_MAPPINGS[inputIndex].channel;
+    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+
+    return writeRegister(SENSOR_I2C_ADDRESSES[s],
+                         CAP1188_REG_CALIBRATION_ACTIVE,
+                         (uint8_t)(1 << ch));
 }
 
 void TouchController::recalibrateAll() {
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        if (m_sensors[i].active) {
-            recalibrate(i);
-        }
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        if (!m_sensors[s].active) continue;
+        writeRegister(SENSOR_I2C_ADDRESSES[s],
+                      CAP1188_REG_CALIBRATION_ACTIVE,
+                      m_sensors[s].enableMask);
     }
 }
 
-bool TouchController::setSensitivity(uint8_t sensorIndex, uint8_t level) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    if (!m_sensors[sensorIndex].active) return false;
+bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
+    if (inputIndex >= INPUT_COUNT) return false;
     if (level > 7) return false;
-    
-    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
-    
-    // Read current sensitivity register value
+    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
+    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+
+    // CAP1188 sensitivity is GLOBAL per chip (bits 6:4 of SENSITIVITY_CONTROL).
+    // 0 = 128x (most sensitive), 7 = 1x (least sensitive).
+    uint8_t address = SENSOR_I2C_ADDRESSES[s];
     uint8_t regValue;
     if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue)) {
         return false;
     }
-    
-    // Sensitivity is in bits 6:4 (DELTA_SENSE[2:0])
-    // 0 = 128x (most sensitive), 7 = 1x (least sensitive)
-    regValue = (regValue & 0x8F) | (level << 4);
-    
+    regValue = (uint8_t)((regValue & 0x8F) | (level << 4));
     return writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue);
 }
 
-void TouchController::setExpectDown(uint8_t sensorIndex, uint32_t commandId) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
-    m_expectDown[sensorIndex].active = true;
-    m_expectDown[sensorIndex].commandId = commandId;
+void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
+    if (inputIndex >= INPUT_COUNT) return;
+    m_expectDown[inputIndex].active = true;
+    m_expectDown[inputIndex].commandId = commandId;
 }
 
-void TouchController::setExpectUp(uint8_t sensorIndex, uint32_t commandId) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
-    m_expectUp[sensorIndex].active = true;
-    m_expectUp[sensorIndex].commandId = commandId;
+void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
+    if (inputIndex >= INPUT_COUNT) return;
+    m_expectUp[inputIndex].active = true;
+    m_expectUp[inputIndex].commandId = commandId;
 }
 
-void TouchController::clearExpectDown(uint8_t sensorIndex) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
-    m_expectDown[sensorIndex].active = false;
-    m_expectDown[sensorIndex].commandId = COMMAND_ID_NONE;
+void TouchController::clearExpectDown(uint8_t inputIndex) {
+    if (inputIndex >= INPUT_COUNT) return;
+    m_expectDown[inputIndex].active = false;
+    m_expectDown[inputIndex].commandId = COMMAND_ID_NONE;
 }
 
-void TouchController::clearExpectUp(uint8_t sensorIndex) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return;
-    m_expectUp[sensorIndex].active = false;
-    m_expectUp[sensorIndex].commandId = COMMAND_ID_NONE;
+void TouchController::clearExpectUp(uint8_t inputIndex) {
+    if (inputIndex >= INPUT_COUNT) return;
+    m_expectUp[inputIndex].active = false;
+    m_expectUp[inputIndex].commandId = COMMAND_ID_NONE;
 }
 
 void TouchController::setExpectAny(uint32_t commandId) {
@@ -152,7 +179,7 @@ void TouchController::setExpectAny(uint32_t commandId) {
     m_expectAnyQueue[m_expectAnyHead].active = true;
     m_expectAnyQueue[m_expectAnyHead].commandId = commandId;
     m_expectAnyHead = (m_expectAnyHead + 1) % EXPECT_ANY_QUEUE_SIZE;
-    
+
     // If head catches tail, advance tail (drop oldest)
     if (m_expectAnyHead == m_expectAnyTail) {
         m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
@@ -171,93 +198,203 @@ void TouchController::clearExpectAny() {
 
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
     if (bufferSize == 0) return;
-    
+
     buffer[0] = '\0';
     size_t pos = 0;
     bool first = true;
-    
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        if (m_sensors[i].active) {
-            size_t needed = first ? 2 : 3;
-            if (pos + needed > bufferSize) break;
-            
-            if (!first) buffer[pos++] = ',';
-            buffer[pos++] = indexToLetter(i);
-            buffer[pos] = '\0';
-            first = false;
-        }
+
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
+        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+
+        char tok[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(i, tok);
+
+        // Need: comma (if not first) + 3 chars + null
+        size_t needed = (first ? 3 : 4) + 1;
+        if (pos + needed > bufferSize) break;
+
+        if (!first) buffer[pos++] = ',';
+        buffer[pos++] = tok[0];
+        buffer[pos++] = tok[1];
+        buffer[pos++] = tok[2];
+        buffer[pos] = '\0';
+        first = false;
     }
 }
 
-bool TouchController::isSensorActive(uint8_t sensorIndex) const {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    return m_sensors[sensorIndex].active;
+void TouchController::buildFailedInputList(char* buffer, size_t bufferSize) const {
+    if (bufferSize == 0) return;
+
+    buffer[0] = '\0';
+    size_t pos = 0;
+    bool first = true;
+
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
+        if (s >= TOUCH_SENSOR_COUNT) continue;
+        if (m_sensors[s].active) continue;  // only list inputs whose sensor FAILED
+
+        char tok[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(i, tok);
+
+        size_t needed = (first ? 3 : 4) + 1;
+        if (pos + needed > bufferSize) break;
+
+        if (!first) buffer[pos++] = ',';
+        buffer[pos++] = tok[0];
+        buffer[pos++] = tok[1];
+        buffer[pos++] = tok[2];
+        buffer[pos] = '\0';
+        first = false;
+    }
 }
 
-bool TouchController::isTouched(uint8_t sensorIndex) const {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    return m_sensors[sensorIndex].debouncedTouched;
+bool TouchController::isInputActive(uint8_t inputIndex) const {
+    if (inputIndex >= INPUT_COUNT) return false;
+    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
+    if (s >= TOUCH_SENSOR_COUNT) return false;
+    return m_sensors[s].active;
+}
+
+bool TouchController::isTouched(uint8_t inputIndex) const {
+    if (inputIndex >= INPUT_COUNT) return false;
+    return m_inputs[inputIndex].debouncedTouched;
 }
 
 uint8_t TouchController::getActiveSensorCount() const {
     return m_activeSensorCount;
 }
 
-bool TouchController::readSensorValue(uint8_t sensorIndex, int8_t& value) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    if (!m_sensors[sensorIndex].active) return false;
-    
-    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+bool TouchController::readSensorValue(uint8_t inputIndex, int8_t& value) {
+    if (inputIndex >= INPUT_COUNT) return false;
+    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
+    uint8_t ch = INPUT_MAPPINGS[inputIndex].channel;
+    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+
     uint8_t rawValue;
-    
-    // Read delta count for CS1 (only CS1 is enabled per sensor)
-    if (!readRegister(address, CAP1188_REG_SENSOR_INPUT_DELTA_1, rawValue)) {
+    if (!readRegister(SENSOR_I2C_ADDRESSES[s],
+                      (uint8_t)(CAP1188_REG_SENSOR_INPUT_DELTA_1 + ch),
+                      rawValue)) {
         return false;
     }
-    
     value = static_cast<int8_t>(rawValue);  // Interpret as signed
     return true;
-}
-
-// ============================================================================
-// Static Utility Methods
-// ============================================================================
-
-uint8_t TouchController::letterToIndex(char letter) {
-    if (letter >= 'a' && letter <= 'y') letter -= 32;
-    if (letter >= 'A' && letter <= 'Y') return letter - 'A';
-    return 255;
-}
-
-char TouchController::indexToLetter(uint8_t index) {
-    if (index < TOUCH_SENSOR_COUNT) return 'A' + index;
-    return '?';
 }
 
 // ============================================================================
 // Private Methods
 // ============================================================================
 
-bool TouchController::initSensor(uint8_t address) {
-    Wire.beginTransmission(address);
-    if (Wire.endTransmission() != 0) return false;
-    
-    delay(10);
-    
+bool TouchController::initSensor(uint8_t sensorIndex) {
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
+    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+
+    // NOTE: We deliberately do NOT do a bare address-only probe here.
+    // Some CAP1188 board variants / level shifters don't ACK an empty
+    // beginTransmission/endTransmission cleanly. Instead we go straight to
+    // reading the product-ID register; that exercises a real read transaction
+    // and is the most reliable "is the chip alive" check.
+
     uint8_t prodId;
-    if (!readRegister(address, CAP1188_REG_PRODUCT_ID, prodId) || prodId != 0x50) {
+    if (!readRegister(address, CAP1188_REG_PRODUCT_ID, prodId)) {
         return false;
     }
-    
-    // Allow multiple touches
+    // Accept any nonzero/non-0xFF product ID. CAP1188 = 0x50, CAP1166 = 0x51.
+    // 0x00 / 0xFF usually mean "no device / floating bus".
+    if (prodId == 0x00 || prodId == 0xFF) {
+        return false;
+    }
+
+    // Allow multiple simultaneous touches
     if (!writeRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, 0x00)) return false;
-    
+
     // Speed up cycle time
     if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) return false;
-    
-    // Enable only CS1 input
-    if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, CAP1188_CS1_BIT_MASK)) return false;
-    
+
+    // Enable exactly the channels referenced by INPUT_MAPPINGS for this sensor.
+    uint8_t mask = m_sensors[sensorIndex].enableMask;
+    if (mask == 0) {
+        // No inputs mapped to this sensor - still considered "init succeeded".
+        return true;
+    }
+    if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, mask)) return false;
+
+    return true;
+}
+
+// ----------------------------------------------------------------------------
+// Diagnostics
+// ----------------------------------------------------------------------------
+
+uint8_t TouchController::scanI2CBus(char* buffer, size_t bufferSize) const {
+    if (bufferSize > 0) buffer[0] = '\0';
+    size_t pos = 0;
+    uint8_t found = 0;
+    bool first = true;
+
+    // Standard 7-bit I²C scan range
+    for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+        Wire.beginTransmission(addr);
+        uint8_t err = Wire.endTransmission();
+        if (err == 0) {
+            found++;
+            // "0xAA" = 4 chars, plus optional comma, plus null
+            if (pos + (first ? 4 : 5) + 1 <= bufferSize) {
+                if (!first) buffer[pos++] = ',';
+                pos += snprintf(buffer + pos, bufferSize - pos, "0x%02X", addr);
+                first = false;
+            }
+        }
+    }
+    return found;
+}
+
+bool TouchController::diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t diagSize) {
+    if (sensorIndex >= TOUCH_SENSOR_COUNT) {
+        if (diagSize) snprintf(outDiag, diagSize, "S? FAIL bad_index");
+        return false;
+    }
+    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+
+    uint8_t prodId = 0;
+    if (!readRegister(address, CAP1188_REG_PRODUCT_ID, prodId)) {
+        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL pid_read", sensorIndex, address);
+        m_sensors[sensorIndex].active = false;
+        return false;
+    }
+    if (prodId == 0x00 || prodId == 0xFF) {
+        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL pid=0x%02X", sensorIndex, address, prodId);
+        m_sensors[sensorIndex].active = false;
+        return false;
+    }
+
+    if (!writeRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, 0x00)) {
+        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_mtblk pid=0x%02X",
+                 sensorIndex, address, prodId);
+        m_sensors[sensorIndex].active = false;
+        return false;
+    }
+    if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) {
+        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_standby pid=0x%02X",
+                 sensorIndex, address, prodId);
+        m_sensors[sensorIndex].active = false;
+        return false;
+    }
+
+    uint8_t mask = m_sensors[sensorIndex].enableMask;
+    if (mask != 0) {
+        if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, mask)) {
+            snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_enable pid=0x%02X",
+                     sensorIndex, address, prodId);
+            m_sensors[sensorIndex].active = false;
+            return false;
+        }
+    }
+
+    snprintf(outDiag, diagSize, "S%u@0x%02X OK pid=0x%02X mask=0x%02X",
+             sensorIndex, address, prodId, mask);
+    m_sensors[sensorIndex].active = true;
     return true;
 }
 
@@ -265,7 +402,7 @@ bool TouchController::readRegister(uint8_t address, uint8_t reg, uint8_t& value)
     Wire.beginTransmission(address);
     Wire.write(reg);
     if (Wire.endTransmission() != 0) return false;
-    
+
     if (Wire.requestFrom(address, (uint8_t)1) == 1) {
         value = Wire.read();
         return true;
@@ -280,96 +417,107 @@ bool TouchController::writeRegister(uint8_t address, uint8_t reg, uint8_t value)
     return Wire.endTransmission() == 0;
 }
 
-int8_t TouchController::readRawTouch(uint8_t address) {
-    uint8_t status;
-    
-    if (!readRegister(address, CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
-        return -1;  // I2C error - return error state, not "not touched"
-    }
-    
-    bool touched = (status & CAP1188_CS1_BIT_MASK) != 0;
-    
-    if (touched) {
-        uint8_t mainControl;
-        if (readRegister(address, CAP1188_REG_MAIN_CONTROL, mainControl)) {
-            writeRegister(address, CAP1188_REG_MAIN_CONTROL, mainControl & ~0x01);
-        }
-    }
-    
-    return touched ? 1 : 0;
-}
-
 void TouchController::pollSensors() {
     uint32_t now = millis();
-    
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        if (!m_sensors[i].active) continue;
-        
-        uint8_t address = SENSOR_I2C_ADDRESSES[i];
-        bool touched = readRawTouch(address);
-        
-        if (touched != m_sensors[i].currentTouched) {
-            m_sensors[i].currentTouched = touched;
+
+    // Step 1: read each active sensor's status register once and cache it.
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        m_sensors[s].statusValid = false;
+        if (!m_sensors[s].active) continue;
+
+        uint8_t status;
+        if (readRegister(SENSOR_I2C_ADDRESSES[s],
+                         CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
+            m_sensors[s].lastStatus = status;
+            m_sensors[s].statusValid = true;
+        }
+    }
+
+    // Step 2: update per-input "current" state from cached status registers.
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
+        uint8_t ch = INPUT_MAPPINGS[i].channel;
+        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+        if (!m_sensors[s].statusValid) continue;  // I2C read failed this cycle
+
+        bool touched = ((m_sensors[s].lastStatus >> ch) & 0x01) != 0;
+
+        if (touched != m_inputs[i].currentTouched) {
+            m_inputs[i].currentTouched = touched;
             // Only reset debounce timer if the new state differs from debounced state
-            // This prevents noise from resetting the timer while holding a touch
-            if (touched != m_sensors[i].debouncedTouched) {
-                m_sensors[i].lastChangeTime = now;
+            // (prevents noise from resetting the timer while holding a touch)
+            if (touched != m_inputs[i].debouncedTouched) {
+                m_inputs[i].lastChangeTime = now;
             }
+        }
+    }
+
+    // Step 3: clear the INT bit on every sensor that reported any active channel,
+    // so that future touches are detected.
+    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+        if (!m_sensors[s].active || !m_sensors[s].statusValid) continue;
+        if (m_sensors[s].lastStatus == 0) continue;
+
+        uint8_t mc;
+        if (readRegister(SENSOR_I2C_ADDRESSES[s], CAP1188_REG_MAIN_CONTROL, mc)) {
+            writeRegister(SENSOR_I2C_ADDRESSES[s],
+                          CAP1188_REG_MAIN_CONTROL, (uint8_t)(mc & ~0x01));
         }
     }
 }
 
 void TouchController::processDebounce() {
     uint32_t now = millis();
-    
-    for (uint8_t i = 0; i < TOUCH_SENSOR_COUNT; i++) {
-        if (!m_sensors[i].active) continue;
-        
-        TouchSensorState& sensor = m_sensors[i];
-        
-        // Only update debounced state if current differs AND enough time has passed
-        if (sensor.currentTouched != sensor.debouncedTouched) {
-            uint32_t elapsed = now - sensor.lastChangeTime;
-            
-            // Use different debounce times: shorter for touch, longer for release
-            uint16_t requiredDebounce = sensor.currentTouched ? TOUCH_DEBOUNCE_PRESS_MS : TOUCH_DEBOUNCE_RELEASE_MS;
-            
-            if (elapsed >= requiredDebounce) {
-                sensor.debouncedTouched = sensor.currentTouched;
-                
-                if (sensor.debouncedTouched != sensor.lastReportedTouched) {
-                    sensor.lastReportedTouched = sensor.debouncedTouched;
-                    
-                    if (m_eventQueue) {
-                        char letter = indexToLetter(i);
-                        
-                        if (sensor.debouncedTouched) {
-                            // Check expect-any queue (skip positions already reported)
-                            if (m_expectAnyTail != m_expectAnyHead && m_expectAnyQueue[m_expectAnyTail].active && !m_expectAnyUsed[i]) {
-                                m_eventQueue->queueTouched(letter, m_expectAnyQueue[m_expectAnyTail].commandId);
-                                m_expectAnyQueue[m_expectAnyTail].active = false;
-                                m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
-                                m_expectAnyUsed[i] = true;
-                                
-                                // Reset used mask when queue is empty
-                                if (m_expectAnyTail == m_expectAnyHead) {
-                                    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
-                                }
-                            }
-                            if (m_expectDown[i].active) {
-                                m_eventQueue->queueTouched(letter, m_expectDown[i].commandId);
-                                m_expectDown[i].active = false;
-                                m_expectDown[i].commandId = COMMAND_ID_NONE;
-                            }
-                        } else {
-                            if (m_expectUp[i].active) {
-                                m_eventQueue->queueTouchReleased(letter, m_expectUp[i].commandId);
-                                m_expectUp[i].active = false;
-                                m_expectUp[i].commandId = COMMAND_ID_NONE;
-                            }
-                        }
-                    }
+
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
+        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+
+        TouchInputState& input = m_inputs[i];
+
+        if (input.currentTouched == input.debouncedTouched) continue;
+
+        uint32_t elapsed = now - input.lastChangeTime;
+        uint16_t requiredDebounce = input.currentTouched
+                                        ? TOUCH_DEBOUNCE_PRESS_MS
+                                        : TOUCH_DEBOUNCE_RELEASE_MS;
+        if (elapsed < requiredDebounce) continue;
+
+        input.debouncedTouched = input.currentTouched;
+        if (input.debouncedTouched == input.lastReportedTouched) continue;
+        input.lastReportedTouched = input.debouncedTouched;
+
+        if (!m_eventQueue) continue;
+
+        char posStr[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(i, posStr);
+
+        if (input.debouncedTouched) {
+            // Check expect-any queue (skip inputs already reported)
+            if (m_expectAnyTail != m_expectAnyHead &&
+                m_expectAnyQueue[m_expectAnyTail].active &&
+                !m_expectAnyUsed[i])
+            {
+                m_eventQueue->queueTouched(posStr, m_expectAnyQueue[m_expectAnyTail].commandId);
+                m_expectAnyQueue[m_expectAnyTail].active = false;
+                m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
+                m_expectAnyUsed[i] = true;
+
+                // Reset used mask when queue is empty
+                if (m_expectAnyTail == m_expectAnyHead) {
+                    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
                 }
+            }
+            if (m_expectDown[i].active) {
+                m_eventQueue->queueTouched(posStr, m_expectDown[i].commandId);
+                m_expectDown[i].active = false;
+                m_expectDown[i].commandId = COMMAND_ID_NONE;
+            }
+        } else {
+            if (m_expectUp[i].active) {
+                m_eventQueue->queueTouchReleased(posStr, m_expectUp[i].commandId);
+                m_expectUp[i].active = false;
+                m_expectUp[i].commandId = COMMAND_ID_NONE;
             }
         }
     }
