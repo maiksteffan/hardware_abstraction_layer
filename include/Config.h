@@ -41,8 +41,8 @@
 // ============================================================================
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
-constexpr uint8_t PIN_LED_STRIP_2 = 25;  // GPIO19 - VSPI MISO
+constexpr uint8_t PIN_LED_STRIP_1 = 19;  // GPIO18 - VSPI CLK
+constexpr uint8_t PIN_LED_STRIP_2 = 18;  // GPIO19 - VSPI MISO
 
 // I2C Pins
 constexpr uint8_t PIN_I2C_SDA = 21;  // Default ESP32 SDA
@@ -245,15 +245,15 @@ struct InputMapping {
 
 constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H01..H07  -> sensor 0, channels 0..6
-    {0,0}, {0,1}, {0,2}, {0,3}, {0,4}, {0,5}, {0,6},
+    {1,3}, {1,5}, {1,6}, {2,1}, {2,6}, {3,1}, {3,5},
     // H08..H14  -> sensor 1, channels 0..6
-    {1,0}, {1,1}, {1,2}, {1,3}, {1,4}, {1,5}, {1,6},
+    {1,0}, {1,2}, {1,4}, {2,0}, {2,3}, {3,0}, {3,3},
     // H15..H21  -> sensor 2, channels 0..6
-    {2,0}, {2,1}, {2,2}, {2,3}, {2,4}, {2,5}, {2,6},
+    {3,6}, {1,1}, {0,3}, {2,2}, {2,5}, {2,4}, {3,2},
     // H22..H28  -> sensor 3, channels 0..6
-    {3,0}, {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {3,6},
+    {3,4}, {0,6}, {0,4}, {0,5}, {4,5}, {4,6}, {4,4},
     // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)
-    {4,0}, {4,1}, {4,2}, {4,3}, {4,4}, {4,5}
+    {0,0}, {0,2}, {0,1}, {4,0}, {4,1}, {4,3}
     // TODO (user): edit this default layout to match the real wiring.
 };
 
