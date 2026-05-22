@@ -41,8 +41,8 @@
 // ============================================================================
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 19;  // GPIO18 - VSPI CLK
-constexpr uint8_t PIN_LED_STRIP_2 = 18;  // GPIO19 - VSPI MISO
+constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
+constexpr uint8_t PIN_LED_STRIP_2 = 19;  // GPIO19 - VSPI MISO
 
 // I2C Pins
 constexpr uint8_t PIN_I2C_SDA = 21;  // Default ESP32 SDA
@@ -134,11 +134,11 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
 
 #ifndef LED_STRIP_1_LENGTH
-#define LED_STRIP_1_LENGTH 190
+#define LED_STRIP_1_LENGTH 260
 #endif
 
 #ifndef LED_STRIP_2_LENGTH
-#define LED_STRIP_2_LENGTH 190
+#define LED_STRIP_2_LENGTH 260
 #endif
 
 constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 128;  // 0-255
@@ -216,7 +216,7 @@ constexpr uint8_t CAP1188_REG_REVISION = 0xFF;
 
 // CAP1188 default values
 constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
-constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 0;
+constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 3;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 
@@ -249,7 +249,7 @@ constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H08..H14  -> sensor 1, channels 0..6
     {1,0}, {1,2}, {1,4}, {2,0}, {2,3}, {3,0}, {3,3},
     // H15..H21  -> sensor 2, channels 0..6
-    {3,6}, {1,1}, {0,3}, {2,2}, {2,5}, {2,4}, {3,2},
+    {3,6}, {1,1}, {0,3}, {2,2}, {2,5}, {4,2}, {3,2},
     // H22..H28  -> sensor 3, channels 0..6
     {3,4}, {0,6}, {0,4}, {0,5}, {4,5}, {4,6}, {4,4},
     // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)

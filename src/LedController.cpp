@@ -20,40 +20,41 @@
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP1, 0 },   // H01
-    { StripId::STRIP1, 0 },   // H02
-    { StripId::STRIP1, 0 },   // H03
-    { StripId::STRIP1, 0 },   // H04
-    { StripId::STRIP1, 0 },   // H05
-    { StripId::STRIP1, 0 },   // H06
-    { StripId::STRIP1, 0 },   // H07
-    { StripId::STRIP1, 0 },   // H08
-    { StripId::STRIP1, 0 },   // H09
-    { StripId::STRIP1, 0 },   // H10
-    { StripId::STRIP1, 0 },   // H11
-    { StripId::STRIP1, 0 },   // H12
-    { StripId::STRIP1, 0 },   // H13
-    { StripId::STRIP1, 0 },   // H14
-    { StripId::STRIP1, 0 },   // H15
-    { StripId::STRIP1, 0 },   // H16
-    { StripId::STRIP1, 0 },   // H17
-    { StripId::STRIP1, 0 },   // H18
-    { StripId::STRIP1, 0 },   // H19
-    { StripId::STRIP1, 0 },   // H20
-    { StripId::STRIP1, 0 },   // H21
-    { StripId::STRIP1, 0 },   // H22
-    { StripId::STRIP1, 0 },   // H23
-    { StripId::STRIP1, 0 },   // H24
-    { StripId::STRIP1, 0 },   // H25
-    { StripId::STRIP1, 0 },   // H26
-    { StripId::STRIP1, 0 },   // H27
-    { StripId::STRIP1, 0 },   // H28
-    { StripId::STRIP1, 0 },   // H29
-    { StripId::STRIP1, 0 },   // H30
-    { StripId::STRIP1, 0 },   // H31
-    { StripId::STRIP1, 0 },   // H32
-    { StripId::STRIP1, 0 },   // H33
-    { StripId::STRIP1, 0 }    // H34
+    { StripId::STRIP2, 216 },   // H01 ++
+    { StripId::STRIP2, 204 },   // H02 --
+    { StripId::STRIP2, 193 },   // H03 --
+    { StripId::STRIP2, 184 },   // H04 ++
+    { StripId::STRIP1, 193 },   // H05
+    { StripId::STRIP1, 204 },   // H06
+    { StripId::STRIP1, 216 },   // H07 +
+    { StripId::STRIP2, 141 },   // H08 ++
+    { StripId::STRIP2, 152 },   // H09 ++
+    { StripId::STRIP2, 164 },   // H10 ++
+    { StripId::STRIP2, 172 },   // H11 ++
+    { StripId::STRIP1, 171 },   // H12
+    { StripId::STRIP1, 163 },   // H13
+    { StripId::STRIP1, 152 },   // H14
+    { StripId::STRIP1, 141 },   // H15
+    { StripId::STRIP2, 122 },   // H16 ++
+    { StripId::STRIP2, 110 },   // H17 ++
+    { StripId::STRIP2, 100 },   // H18 ++
+    { StripId::STRIP2, 90 },   // H19 ++
+    { StripId::STRIP1, 99 },   // H20
+    { StripId::STRIP1, 111 },   // H21
+    { StripId::STRIP1, 122 },   // H22
+    { StripId::STRIP2, 49 },   // H23 ++
+    { StripId::STRIP2, 60 },   // H24 + ...
+    { StripId::STRIP2, 72 },   // H25 + ..
+    { StripId::STRIP1, 72 },   // H26 
+    { StripId::STRIP1, 60 },   // H27
+    { StripId::STRIP1, 49 },   // H28
+    { StripId::STRIP2, 30 },   // H29 ++
+    { StripId::STRIP2, 18 },   // H30
+    { StripId::STRIP2, 7 },   // H31
+    { StripId::STRIP1, 7 },   // H32
+    { StripId::STRIP1, 18 },   // H33
+    { StripId::STRIP1, 30 },    // H34
+   
 };
 
 // ============================================================================
