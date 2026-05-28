@@ -115,8 +115,16 @@ constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
 
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
-constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS = 100;
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 100;
+
+// Asymmetric debounce — INSTANT on press, very latched on release.
+// Press fires on the first sample (no debounce delay), giving sub-poll-cycle
+// response. Release requires the sensor to read "untouched" continuously for
+// TOUCH_DEBOUNCE_RELEASE_MS — every transient "touched" sample during that
+// window resets the timer (see TouchController::pollSensors()), so even
+// repeated short re-contacts keep the touch latched.
+constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 800;   // tolerate up to 800 ms dropouts
+
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
 
