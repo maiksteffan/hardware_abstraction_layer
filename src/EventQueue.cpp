@@ -60,12 +60,15 @@ void EventQueue::begin() {
 
 void EventQueue::flush(uint8_t maxEvents) {
     uint8_t sentCount = 0;
-    
+
     while (!isEmpty() && sentCount < maxEvents) {
         Event event;
         bool eventRetrieved = false;
-        
-        if (xSemaphoreTake(m_queueMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_FLUSH_MS)) == pdTRUE) {
+
+        // Use a longer timeout than MUTEX_TIMEOUT_FLUSH_MS here: if the touch
+        // task on Core 0 is mid-enqueue, silently bailing out leaves all
+        // pending replies (ACK/DONE/SCANNED) stuck and the Pi times out.
+        if (xSemaphoreTake(m_queueMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_QUEUE_MS)) == pdTRUE) {
             if (m_count > 0 && m_events[m_tail].valid) {
                 event = m_events[m_tail];
                 m_events[m_tail].valid = false;
@@ -75,7 +78,7 @@ void EventQueue::flush(uint8_t maxEvents) {
             }
             xSemaphoreGive(m_queueMutex);
         }
-        
+
         if (eventRetrieved) {
             sendEvent(event);
             sentCount++;
@@ -335,15 +338,20 @@ void EventQueue::sendEvent(const Event& event) {
     }
     
     // Thread-safe serial write
-    if (xSemaphoreTake(m_serialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_SERIAL_MS)) == pdTRUE) {
+    // Block indefinitely on the serial mutex: dropping an outbound message
+    // silently (e.g. SCANNED, ACK, DONE) is far worse than briefly blocking
+    // the caller. The mutex is only held for the duration of one Serial.write
+    // + Serial.flush (bounded by UART speed: ~15 ms for a 160-byte line at
+    // 115200 baud), so portMAX_DELAY here cannot deadlock the system.
+    if (xSemaphoreTake(m_serialMutex, portMAX_DELAY) == pdTRUE) {
         Serial.write(buffer, length);
         // Block until every byte has been fully transmitted on the wire before
         // releasing the mutex. Without this, Serial.write() only queues bytes
-        // into the 256-byte TX ring buffer and returns; a subsequent event's
-        // bytes can then be appended while the previous bytes are still
-        // draining — and any UART hiccup mid-drain (interrupt disable from
-        // NeoPixel show(), watchdog yield, etc.) can split a single message
-        // across multiple physical "chunks" on the wire from the Pi's POV.
+        // into the TX ring buffer and returns; a subsequent event's bytes can
+        // then be appended while the previous bytes are still draining — and
+        // any UART hiccup mid-drain (interrupt disable from NeoPixel show(),
+        // watchdog yield, etc.) can split a single message across multiple
+        // physical "chunks" on the wire from the Pi's POV.
         Serial.flush();
         xSemaphoreGive(m_serialMutex);
     }

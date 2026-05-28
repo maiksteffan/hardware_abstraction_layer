@@ -85,7 +85,12 @@ constexpr uint8_t QUEUE_SIZE_EVENTS   = 64;
 constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY commands
 
 // Flush settings
-constexpr uint8_t EVENTS_PER_FLUSH = 5;  // Max events to send per loop iteration
+// Set to the full event queue capacity so the main loop drains every pending
+// event each tick. With Serial.flush() in sendEvent() the UART itself paces
+// us (~15 ms per ~150-byte line at 115200 baud), so an artificial per-tick
+// cap only delays replies like SCANNED behind TOUCHED bursts and is what
+// caused the Pi to time out waiting for SCANNED.
+constexpr uint8_t EVENTS_PER_FLUSH = QUEUE_SIZE_EVENTS;
 
 // Serial output buffer
 // Must fit "SCANNED [H01,H02,...,H34] #4294967295\n" = ~156 chars worst case.
