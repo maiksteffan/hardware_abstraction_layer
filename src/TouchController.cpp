@@ -196,6 +196,16 @@ void TouchController::clearExpectAny() {
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
 
+void TouchController::clearAllExpectations() {
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        m_expectDown[i].active = false;
+        m_expectDown[i].commandId = COMMAND_ID_NONE;
+        m_expectUp[i].active = false;
+        m_expectUp[i].commandId = COMMAND_ID_NONE;
+    }
+    clearExpectAny();
+}
+
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
     if (bufferSize == 0) return;
 

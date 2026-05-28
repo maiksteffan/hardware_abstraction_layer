@@ -25,6 +25,7 @@
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value
  *   SET_SENSITIVITY <pos> <lvl>   - Set sensitivity (0=most, 7=least)
+ *   CLEAN_QUEUE [#id]             - Clear all pending touch expectations
  * 
  * Utility Commands:
  *   PING [#id]                    - Health check
@@ -69,7 +70,8 @@ enum class CommandAction : uint8_t {
     SCAN,
     SEQUENCE_COMPLETED,
     INFO,
-    PING
+    PING,
+    CLEAN_QUEUE
 };
 
 // ============================================================================

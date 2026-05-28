@@ -295,6 +295,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "SEQUENCE_COMPLETED", len)) return CommandAction::SEQUENCE_COMPLETED;
     if (strcasecmpN(str, "INFO", len)) return CommandAction::INFO;
     if (strcasecmpN(str, "PING", len)) return CommandAction::PING;
+    if (strcasecmpN(str, "CLEAN_QUEUE", len)) return CommandAction::CLEAN_QUEUE;
     return CommandAction::INVALID;
 }
 
@@ -322,6 +323,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::SEQUENCE_COMPLETED: return "SEQUENCE_COMPLETED";
         case CommandAction::INFO: return "INFO";
         case CommandAction::PING: return "PING";
+        case CommandAction::CLEAN_QUEUE: return "CLEAN_QUEUE";
         default: return "INVALID";
     }
 }
@@ -537,6 +539,13 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             break;
             
         case CommandAction::PING:
+            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
+        case CommandAction::CLEAN_QUEUE:
+            if (m_touchController) {
+                m_touchController->clearAllExpectations();
+            }
             m_eventQueue.queueAck(actionStr, 0, cmdId);
             break;
             

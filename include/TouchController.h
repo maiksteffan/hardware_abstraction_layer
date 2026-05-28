@@ -74,6 +74,7 @@ public:
     void clearExpectDown(uint8_t inputIndex);
     void clearExpectUp(uint8_t inputIndex);
     void clearExpectAny();
+    void clearAllExpectations();  // Clear every pending EXPECT/EXPECT_RELEASE/EXPECT_ANY
     
     // State queries
     bool isInputActive(uint8_t inputIndex) const;     // input's parent sensor is active
