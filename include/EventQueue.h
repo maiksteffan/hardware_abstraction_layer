@@ -57,6 +57,7 @@ public:
     
     void begin();
     void flush(uint8_t maxEvents = 5);
+    void clear();   // Drop every pending event
     
     bool isFull() const;
     bool isEmpty() const;

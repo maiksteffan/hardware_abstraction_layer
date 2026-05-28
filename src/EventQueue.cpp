@@ -97,6 +97,19 @@ uint8_t EventQueue::count() const {
     return m_count;
 }
 
+void EventQueue::clear() {
+    if (m_queueMutex &&
+        xSemaphoreTake(m_queueMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_QUEUE_MS)) == pdTRUE) {
+        for (uint8_t i = 0; i < QUEUE_SIZE_EVENTS; i++) {
+            m_events[i].valid = false;
+        }
+        m_head = 0;
+        m_tail = 0;
+        m_count = 0;
+        xSemaphoreGive(m_queueMutex);
+    }
+}
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
@@ -324,6 +337,14 @@ void EventQueue::sendEvent(const Event& event) {
     // Thread-safe serial write
     if (xSemaphoreTake(m_serialMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_SERIAL_MS)) == pdTRUE) {
         Serial.write(buffer, length);
+        // Block until every byte has been fully transmitted on the wire before
+        // releasing the mutex. Without this, Serial.write() only queues bytes
+        // into the 256-byte TX ring buffer and returns; a subsequent event's
+        // bytes can then be appended while the previous bytes are still
+        // draining — and any UART hiccup mid-drain (interrupt disable from
+        // NeoPixel show(), watchdog yield, etc.) can split a single message
+        // across multiple physical "chunks" on the wire from the Pi's POV.
+        Serial.flush();
         xSemaphoreGive(m_serialMutex);
     }
 }

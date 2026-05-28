@@ -70,7 +70,7 @@ constexpr uint8_t PRIORITY_LED_TASK   = 1;
 
 constexpr uint32_t SERIAL_BAUD_RATE = 115200;
 constexpr size_t SERIAL_RX_BUFFER_SIZE = 256;
-constexpr size_t SERIAL_TX_BUFFER_SIZE = 256;
+constexpr size_t SERIAL_TX_BUFFER_SIZE = 1024;
 constexpr size_t SERIAL_LINE_MAX_LENGTH = 64;
 constexpr uint16_t SERIAL_STARTUP_WAIT_MS = 3000;  // Max wait for serial ready
 constexpr uint16_t SERIAL_LINE_TIMEOUT_MS = 50;    // Timeout to complete partial line

@@ -546,6 +546,11 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             if (m_touchController) {
                 m_touchController->clearAllExpectations();
             }
+            // Drop every stale event still queued from the previous session
+            // (e.g. TOUCHED bursts from before CLEAN_QUEUE was issued). They
+            // would otherwise sit ahead of subsequent SCANNED/ACK responses
+            // and starve the serial link.
+            m_eventQueue.clear();
             m_eventQueue.queueAck(actionStr, 0, cmdId);
             break;
             
