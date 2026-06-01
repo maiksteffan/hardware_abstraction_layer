@@ -152,12 +152,30 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
 
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= INPUT_COUNT) return;
+    // Level-triggered: if the input is already touched at the moment the
+    // expectation is armed, fire immediately. This handles the race where the
+    // Pi arms EXPECT after the user has already moved their finger onto the
+    // next hold (e.g. while the previous input is still inside its long
+    // release-debounce window).
+    if (m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
+        char posStr[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(inputIndex, posStr);
+        m_eventQueue->queueTouched(posStr, commandId);
+        return;
+    }
     m_expectDown[inputIndex].active = true;
     m_expectDown[inputIndex].commandId = commandId;
 }
 
 void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= INPUT_COUNT) return;
+    // Level-triggered: if the input is already released, fire immediately.
+    if (!m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
+        char posStr[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(inputIndex, posStr);
+        m_eventQueue->queueTouchReleased(posStr, commandId);
+        return;
+    }
     m_expectUp[inputIndex].active = true;
     m_expectUp[inputIndex].commandId = commandId;
 }
