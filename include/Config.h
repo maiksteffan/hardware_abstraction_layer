@@ -128,7 +128,7 @@ constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 // window resets the timer (see TouchController::pollSensors()), so even
 // repeated short re-contacts keep the touch latched.
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 800;   // tolerate up to 800 ms dropouts
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 50;    // short release latch so quick hold-to-hold transitions are detected
 
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
