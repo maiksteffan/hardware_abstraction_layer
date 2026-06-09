@@ -16,8 +16,7 @@
  *   CONTRACT_STEP <pos> [#id]     - Contract lit area by 1 LED on each side
  *   MENUE_CHANGE <r,g,b> <range>  - Expand animation on both strips from 0 to range
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
- *   PLAY_RECORD_ANIMATION [#id]   - Blink all positions dim white until stopped
- *   STOP_RECORD_ANIMATION [#id]   - Stop record blink and hide all LEDs
+ *   INDICATE_RECORDING [#id]      - Light all positions static dim white (clear with HIDE_ALL)
  * 
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for touch
@@ -73,8 +72,7 @@ enum class CommandAction : uint8_t {
     SET_SENSITIVITY,
     SCAN,
     SEQUENCE_COMPLETED,
-    PLAY_RECORD_ANIMATION,
-    STOP_RECORD_ANIMATION,
+    INDICATE_RECORDING,
     INFO,
     PING,
     CLEAN_QUEUE

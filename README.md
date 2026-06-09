@@ -77,8 +77,7 @@ as visual-only confirmation.
 | CONTRACT_STEP | `CONTRACT_STEP H01 [#id]` | `ACK CONTRACT_STEP H01` | Shrink by 1 LED each side |
 | SEQUENCE_COMPLETED | `SEQUENCE_COMPLETED [#id]` | `ACK` → `DONE` | Celebration animation |
 | MENUE_CHANGE | `MENUE_CHANGE r,g,b range` | `ACK MENUE_CHANGE` | Color sweep (e.g. `255,0,0 50`) |
-| PLAY_RECORD_ANIMATION | `PLAY_RECORD_ANIMATION [#id]` | `ACK PLAY_RECORD_ANIMATION` | Blink all positions dim white until stopped |
-| STOP_RECORD_ANIMATION | `STOP_RECORD_ANIMATION [#id]` | `ACK STOP_RECORD_ANIMATION` | Stop record blink and hide all LEDs |
+| INDICATE_RECORDING | `INDICATE_RECORDING [#id]` | `ACK INDICATE_RECORDING` | Light all positions static dim white (clear with `HIDE_ALL`) |
 
 ### Touch Sensing
 

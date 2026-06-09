@@ -75,9 +75,6 @@ LedController::LedController()
     , m_menuChangeG(0)
     , m_menuChangeB(0)
     , m_menuChangeLastTime(0)
-    , m_recordAnimActive(false)
-    , m_recordAnimOn(false)
-    , m_recordAnimLastTime(0)
 {
 }
 
@@ -106,9 +103,6 @@ void LedController::begin() {
     m_sequenceAnimActive = false;
     m_menuChangeActive = false;
     m_needsUpdate = false;
-    m_recordAnimActive = false;
-    m_recordAnimOn = false;
-    m_recordAnimLastTime = 0;
 }
 
 void LedController::tick() {
@@ -133,10 +127,6 @@ void LedController::update(uint32_t nowMillis) {
     
     if (m_menuChangeActive) {
         updateMenuChangeAnimation(nowMillis);
-    }
-    
-    if (m_recordAnimActive) {
-        updateRecordAnimation(nowMillis);
     }
     
     if (m_needsUpdate) {
@@ -409,8 +399,9 @@ bool LedController::isMenuChangeAnimationComplete() const {
     return !m_menuChangeActive;
 }
 
-void LedController::startRecordAnimation() {
-    // Stop any other full-strip animations so the record blink owns the strips.
+void LedController::indicateRecording() {
+    // Light every mapped position in static dim white. Stays lit until a
+    // subsequent command (e.g. HIDE_ALL) clears the strips.
     m_sequenceAnimActive = false;
     m_menuChangeActive = false;
 
@@ -421,18 +412,14 @@ void LedController::startRecordAnimation() {
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
+
+        const LedMapping* mapping = getMapping(i);
+        if (mapping) {
+            setLed(mapping->strip, mapping->index,
+                   COLOR_RECORD_R, COLOR_RECORD_G, COLOR_RECORD_B);
+        }
     }
-
-    m_recordAnimActive = true;
-    m_recordAnimOn = false;          // updateRecordAnimation() flips it to ON immediately
-    m_recordAnimLastTime = 0;        // force an immediate first toggle
     m_needsUpdate = true;
-}
-
-void LedController::stopRecordAnimation() {
-    m_recordAnimActive = false;
-    m_recordAnimOn = false;
-    hideAll();
 }
 
 bool LedController::isAnimationComplete(uint8_t position) const {
@@ -686,31 +673,5 @@ void LedController::updateMenuChangeAnimation(uint32_t nowMillis) {
         // Animation complete
         m_menuChangeActive = false;
     }
-}
-
-void LedController::updateRecordAnimation(uint32_t nowMillis) {
-    if (m_recordAnimLastTime != 0 &&
-        nowMillis - m_recordAnimLastTime < LED_RECORD_BLINK_INTERVAL_MS) {
-        return;
-    }
-
-    m_recordAnimOn = !m_recordAnimOn;
-    m_recordAnimLastTime = nowMillis;
-
-    // Blink the center LED of every mapped position in dim white.
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
-        const LedMapping* mapping = getMapping(i);
-        if (!mapping) continue;
-
-        if (m_recordAnimOn) {
-            setLed(mapping->strip, mapping->index,
-                   COLOR_RECORD_R, COLOR_RECORD_G, COLOR_RECORD_B);
-        } else {
-            setLed(mapping->strip, mapping->index,
-                   COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        }
-    }
-
-    m_needsUpdate = true;
 }
 
