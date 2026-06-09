@@ -24,6 +24,15 @@ struct LedMapping {
     uint8_t index;
 };
 
+// Optional second physical LED for a logical position, so a single command
+// (SHOW/SUCCESS/HIDE/...) lights up both sides. Only positions that need a
+// mirror are listed in LED_MIRRORS; everything else has a single LED.
+struct LedMirror {
+    uint8_t position;   // 0-based logical position (e.g. 3 == H04)
+    StripId strip;
+    uint8_t index;
+};
+
 enum class PositionState : uint8_t {
     OFF,
     SHOWN,
@@ -104,6 +113,10 @@ private:
     
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
+    const LedMirror* getMirror(uint8_t position) const;
+    // Paint a logical position (primary LED + optional mirror) at the given
+    // offset from its center. Used for solid colors and symmetric animations.
+    void paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b);
     Adafruit_NeoPixel* getStrip(StripId strip);
     uint16_t getStripLength(StripId strip) const;
     void setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, uint8_t b);

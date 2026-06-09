@@ -20,42 +20,59 @@
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 216 },  
-    { StripId::STRIP2, 204 },   
-    { StripId::STRIP2, 193 },   
-    { StripId::STRIP2, 184 },  
-    { StripId::STRIP1, 193 },   
-    { StripId::STRIP1, 204 },  
-    { StripId::STRIP1, 216 },  
-    { StripId::STRIP2, 141 },   
-    { StripId::STRIP2, 152 },   
-    { StripId::STRIP2, 164 },  
-    { StripId::STRIP2, 172 },  
-    { StripId::STRIP1, 171 },   
-    { StripId::STRIP1, 163 },   
-    { StripId::STRIP1, 152 },   
-    { StripId::STRIP1, 141 },   
-    { StripId::STRIP2, 122 },  
-    { StripId::STRIP2, 110 }, 
-    { StripId::STRIP2, 100 },  
-    { StripId::STRIP2, 90 },  
-    { StripId::STRIP1, 99 },  
-    { StripId::STRIP1, 111 }, 
-    { StripId::STRIP1, 122 }, 
-    { StripId::STRIP2, 49 },  
-    { StripId::STRIP2, 60 },  
-    { StripId::STRIP2, 72 },  
-    { StripId::STRIP1, 72 },
-    { StripId::STRIP1, 60 },
-    { StripId::STRIP1, 49 },  
-    { StripId::STRIP2, 30 },   
-    { StripId::STRIP2, 18 },  
-    { StripId::STRIP2, 7 },  
-    { StripId::STRIP1, 7 }, 
-    { StripId::STRIP1, 18 },   
-    { StripId::STRIP1, 30 },    
-   
+    { StripId::STRIP2, 216 },  //H01
+    { StripId::STRIP2, 204 },  //H02 
+    { StripId::STRIP2, 193 },  //H03 
+    { StripId::STRIP2, 184 },  //H04
+    // { StripId::STRIP1, 184 },  //H04(2)
+    { StripId::STRIP1, 193 },   //H05
+    { StripId::STRIP1, 204 },  //H06
+    { StripId::STRIP1, 216 },  //H07
+    { StripId::STRIP2, 141 },  //H08  
+    { StripId::STRIP2, 152 },   //H09
+    { StripId::STRIP2, 164 },  //H10
+    { StripId::STRIP2, 172 },  //H11
+    { StripId::STRIP1, 171 },   //H12
+    { StripId::STRIP1, 163 },   //H13
+    { StripId::STRIP1, 152 },   //H14
+    { StripId::STRIP1, 141 },   //H15
+    { StripId::STRIP2, 122 },  //H16
+    { StripId::STRIP2, 110 }, //H17
+    { StripId::STRIP2, 100 },  //H18
+    { StripId::STRIP2, 90 },   //H19
+    //{ StripId::STRIP1, 90 },   //H19 (2)
+    { StripId::STRIP1, 99 },  //H20
+    { StripId::STRIP1, 111 }, //H21
+    { StripId::STRIP1, 122 }, //H22
+    { StripId::STRIP2, 49 },  //H23
+    { StripId::STRIP2, 60 },  //H24
+    { StripId::STRIP2, 72 },  //H25
+    { StripId::STRIP1, 72 },  //H26
+    { StripId::STRIP1, 60 },  //H27
+    { StripId::STRIP1, 49 },  //H28
+    { StripId::STRIP2, 30 },  //H29 
+    { StripId::STRIP2, 18 },  //H30
+    { StripId::STRIP2, 7 },  //H31
+    { StripId::STRIP1, 7 },   //H32
+    { StripId::STRIP1, 18 },   //H33
+    { StripId::STRIP1, 30 },    //H34
 };
+
+// ============================================================================
+// LED Mirrors (positions that also drive a second physical LED)
+// ============================================================================
+// Some logical positions are wired to an LED on both strips. Every command for
+// such a position (SHOW, SUCCESS, HIDE, BLINK, expand/contract animations, ...)
+// lights up both LEDs automatically. Add a line here to give any position a
+// second LED; positions not listed keep their single LED from LED_MAPPINGS.
+// ============================================================================
+
+static const LedMirror LED_MIRRORS[] = {
+    { 3,  StripId::STRIP1, 184 },  // H04 -> mirror on strip 1
+    { 18, StripId::STRIP1, 90  },  // H19 -> mirror on strip 1
+};
+
+static constexpr uint8_t LED_MIRROR_COUNT = sizeof(LED_MIRRORS) / sizeof(LED_MIRRORS[0]);
 
 // ============================================================================
 // Constructor
@@ -152,7 +169,7 @@ bool LedController::show(uint8_t position) {
     m_positions[position].animationStep = 0;
     m_positions[position].expansionRadius = 0;
     
-    setLed(mapping->strip, mapping->index, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+    paint(position, 0, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     m_needsUpdate = true;
     
     return true;
@@ -203,7 +220,7 @@ bool LedController::success(uint8_t position) {
     } else if (m_positions[position].state == PositionState::SHOWN ||
                m_positions[position].state == PositionState::BLINKING) {
         // Just clear the single center LED
-        setLed(mapping->strip, mapping->index, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+        paint(position, 0, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     }
     
     m_positions[position].state = PositionState::ANIMATING;
@@ -211,7 +228,7 @@ bool LedController::success(uint8_t position) {
     m_positions[position].lastAnimationTime = millis();
     
     // Set center LED to green immediately
-    setLed(mapping->strip, mapping->index, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     m_needsUpdate = true;
     
     return true;
@@ -231,7 +248,7 @@ bool LedController::fail(uint8_t position) {
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
     
-    setLed(mapping->strip, mapping->index, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
+    paint(position, 0, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
     m_needsUpdate = true;
     
     return true;
@@ -253,7 +270,7 @@ bool LedController::contract(uint8_t position) {
     } else {
         // If not expanded, just ensure it's shown as a single green LED
         m_positions[position].state = PositionState::SHOWN;
-        setLed(mapping->strip, mapping->index, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+        paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     }
     
     m_needsUpdate = true;
@@ -276,7 +293,7 @@ bool LedController::blink(uint8_t position) {
     m_positions[position].lastAnimationTime = millis();
     m_positions[position].blinkOn = true;
     
-    setLed(mapping->strip, mapping->index, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
+    paint(position, 0, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
     m_needsUpdate = true;
     
     return true;
@@ -292,7 +309,7 @@ bool LedController::stopBlink(uint8_t position) {
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
     
-    setLed(mapping->strip, mapping->index, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+    paint(position, 0, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     
     m_positions[position].state = PositionState::OFF;
     m_positions[position].animationStep = 0;
@@ -318,12 +335,9 @@ bool LedController::expandStep(uint8_t position) {
     }
     
     // Light up the new outer LEDs (left and right of center)
-    int16_t leftIndex = mapping->index - newRadius;
-    int16_t rightIndex = mapping->index + newRadius;
-    
     // Set new outer LEDs to blue (same as SHOW color)
-    setLed(mapping->strip, leftIndex, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
-    setLed(mapping->strip, rightIndex, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+    paint(position, -(int16_t)newRadius, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+    paint(position, (int16_t)newRadius, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     
     // Update state
     m_positions[position].expansionRadius = newRadius;
@@ -348,11 +362,8 @@ bool LedController::contractStep(uint8_t position) {
     }
     
     // Turn off the outer LEDs (left and right at current radius)
-    int16_t leftIndex = mapping->index - currentRadius;
-    int16_t rightIndex = mapping->index + currentRadius;
-    
-    setLed(mapping->strip, leftIndex, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-    setLed(mapping->strip, rightIndex, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+    paint(position, -(int16_t)currentRadius, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+    paint(position, (int16_t)currentRadius, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     
     // Decrease radius
     m_positions[position].expansionRadius = currentRadius - 1;
@@ -415,8 +426,7 @@ void LedController::indicateRecording() {
 
         const LedMapping* mapping = getMapping(i);
         if (mapping) {
-            setLed(mapping->strip, mapping->index,
-                   COLOR_RECORD_R, COLOR_RECORD_G, COLOR_RECORD_B);
+            paint(i, 0, COLOR_RECORD_R, COLOR_RECORD_G, COLOR_RECORD_B);
         }
     }
     m_needsUpdate = true;
@@ -444,6 +454,24 @@ bool LedController::isBlinking(uint8_t position) const {
 const LedMapping* LedController::getMapping(uint8_t position) const {
     if (position >= LED_POSITION_COUNT) return nullptr;
     return &LED_MAPPINGS[position];
+}
+
+const LedMirror* LedController::getMirror(uint8_t position) const {
+    for (uint8_t i = 0; i < LED_MIRROR_COUNT; i++) {
+        if (LED_MIRRORS[i].position == position) return &LED_MIRRORS[i];
+    }
+    return nullptr;
+}
+
+void LedController::paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b) {
+    const LedMapping* mapping = getMapping(position);
+    if (!mapping) return;
+    setLed(mapping->strip, (int16_t)mapping->index + offset, r, g, b);
+
+    const LedMirror* mirror = getMirror(position);
+    if (mirror) {
+        setLed(mirror->strip, (int16_t)mirror->index + offset, r, g, b);
+    }
 }
 
 Adafruit_NeoPixel* LedController::getStrip(StripId strip) {
@@ -496,9 +524,6 @@ void LedController::clearAll() {
 void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapping) {
     if (!mapping) return;
     
-    uint16_t stripLen = getStripLength(mapping->strip);
-    int16_t center = mapping->index;
-    
     // Clear based on whichever is larger: the tracked expansion radius or the animation radius
     uint8_t clearRadius = m_positions[position].expansionRadius;
     if (LED_SUCCESS_EXPANSION_RADIUS > clearRadius) {
@@ -506,10 +531,7 @@ void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapp
     }
     
     for (int16_t offset = -(int16_t)clearRadius; offset <= (int16_t)clearRadius; offset++) {
-        int16_t idx = center + offset;
-        if (idx >= 0 && idx < (int16_t)stripLen) {
-            setLed(mapping->strip, idx, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        }
+        paint(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     }
     
     // Reset the expansion radius
@@ -533,22 +555,13 @@ void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
     }
     
     // Re-render the entire expanded region to prevent color bleeding from concurrent access
-    uint16_t stripLen = getStripLength(mapping->strip);
-    int16_t center = mapping->index;
-    
     // Always set center LED
-    setLed(mapping->strip, center, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     
     // Set all expanded LEDs up to current step
     for (uint8_t r = 1; r <= data.animationStep; r++) {
-        int16_t leftIdx = center - r;
-        if (leftIdx >= 0) {
-            setLed(mapping->strip, leftIdx, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-        }
-        int16_t rightIdx = center + r;
-        if (rightIdx < (int16_t)stripLen) {
-            setLed(mapping->strip, rightIdx, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-        }
+        paint(position, -(int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+        paint(position, (int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     }
     
     m_needsUpdate = true;
@@ -564,24 +577,15 @@ void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis
     
     data.lastAnimationTime = nowMillis;
     
-    uint16_t stripLen = getStripLength(mapping->strip);
-    int16_t center = mapping->index;
-    
     // Turn off the outermost LEDs at current radius
     if (data.animationStep > 0) {
-        int16_t leftIdx = center - data.animationStep;
-        if (leftIdx >= 0) {
-            setLed(mapping->strip, leftIdx, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        }
-        int16_t rightIdx = center + data.animationStep;
-        if (rightIdx < (int16_t)stripLen) {
-            setLed(mapping->strip, rightIdx, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        }
+        paint(position, -(int16_t)data.animationStep, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+        paint(position, (int16_t)data.animationStep, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
         data.animationStep--;
     }
     
     // Keep center LED green
-    setLed(mapping->strip, center, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     
     // Check if contraction is complete
     if (data.animationStep == 0) {
@@ -603,9 +607,9 @@ void LedController::updateBlinking(uint32_t nowMillis) {
                 const LedMapping* mapping = getMapping(i);
                 if (mapping) {
                     if (data.blinkOn) {
-                        setLed(mapping->strip, mapping->index, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
+                        paint(i, 0, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
                     } else {
-                        setLed(mapping->strip, mapping->index, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+                        paint(i, 0, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
                     }
                     m_needsUpdate = true;
                 }
