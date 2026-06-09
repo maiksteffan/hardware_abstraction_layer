@@ -44,6 +44,7 @@ struct TouchInputState {
 struct ExpectState {
     bool active;
     uint32_t commandId;
+    uint64_t excludeMask;  // EXPECT_ANY_EXCEPT only: bit i set => input i is excluded
 };
 
 // ============================================================================
@@ -71,6 +72,7 @@ public:
     void setExpectDown(uint8_t inputIndex, uint32_t commandId);
     void setExpectUp(uint8_t inputIndex, uint32_t commandId);
     void setExpectAny(uint32_t commandId);
+    void setExpectAnyExcept(uint64_t excludeMask, uint32_t commandId);
     void clearExpectDown(uint8_t inputIndex);
     void clearExpectUp(uint8_t inputIndex);
     void clearExpectAny();

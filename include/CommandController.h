@@ -20,6 +20,7 @@
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for touch
  *   EXPECT_ANY [#id]              - Wait for any touch (first touched position)
+ *   EXPECT_ANY_EXCEPT [<pos>...] [#id] - Wait for any touch except the listed positions
  *   EXPECT_RELEASE <pos> [#id]    - Wait for release
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
@@ -62,6 +63,7 @@ enum class CommandAction : uint8_t {
     MENUE_CHANGE,
     EXPECT,
     EXPECT_ANY,
+    EXPECT_ANY_EXCEPT,
     EXPECT_RELEASE,
     RECALIBRATE,
     RECALIBRATE_ALL,
@@ -88,6 +90,7 @@ struct ParsedCommand {
     uint8_t extraValue;  // For commands that need an extra numeric parameter (e.g., sensitivity level)
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
+    uint64_t excludeMask; // EXPECT_ANY_EXCEPT: bit i set => input i is excluded
     bool valid;
 };
 

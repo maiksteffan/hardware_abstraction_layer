@@ -39,12 +39,15 @@ TouchController::TouchController()
 
         m_expectDown[i].active = false;
         m_expectDown[i].commandId = COMMAND_ID_NONE;
+        m_expectDown[i].excludeMask = 0;
         m_expectUp[i].active = false;
         m_expectUp[i].commandId = COMMAND_ID_NONE;
+        m_expectUp[i].excludeMask = 0;
     }
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
+        m_expectAnyQueue[i].excludeMask = 0;
     }
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
 }
@@ -175,9 +178,14 @@ void TouchController::clearExpectUp(uint8_t inputIndex) {
 }
 
 void TouchController::setExpectAny(uint32_t commandId) {
+    setExpectAnyExcept(0, commandId);
+}
+
+void TouchController::setExpectAnyExcept(uint64_t excludeMask, uint32_t commandId) {
     // Enqueue into circular buffer
     m_expectAnyQueue[m_expectAnyHead].active = true;
     m_expectAnyQueue[m_expectAnyHead].commandId = commandId;
+    m_expectAnyQueue[m_expectAnyHead].excludeMask = excludeMask;
     m_expectAnyHead = (m_expectAnyHead + 1) % EXPECT_ANY_QUEUE_SIZE;
 
     // If head catches tail, advance tail (drop oldest)
@@ -190,6 +198,7 @@ void TouchController::clearExpectAny() {
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
+        m_expectAnyQueue[i].excludeMask = 0;
     }
     m_expectAnyHead = 0;
     m_expectAnyTail = 0;
@@ -503,10 +512,12 @@ void TouchController::processDebounce() {
         CommandController::indexToPosition(i, posStr);
 
         if (input.debouncedTouched) {
-            // Check expect-any queue (skip inputs already reported)
+            // Check expect-any queue (skip inputs already reported, and inputs
+            // excluded by an EXPECT_ANY_EXCEPT at the head of the queue).
             if (m_expectAnyTail != m_expectAnyHead &&
                 m_expectAnyQueue[m_expectAnyTail].active &&
-                !m_expectAnyUsed[i])
+                !m_expectAnyUsed[i] &&
+                !((m_expectAnyQueue[m_expectAnyTail].excludeMask >> i) & (uint64_t)1))
             {
                 m_eventQueue->queueTouched(posStr, m_expectAnyQueue[m_expectAnyTail].commandId);
                 m_expectAnyQueue[m_expectAnyTail].active = false;

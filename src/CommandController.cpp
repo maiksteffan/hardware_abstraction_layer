@@ -144,6 +144,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.g = 0;
     cmd.b = 0;
     cmd.range = 0;
+    cmd.excludeMask = 0;
     cmd.valid = false;
     
     const char* p = skipWhitespace(line);
@@ -235,6 +236,24 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         p = skipWhitespace(posEnd);
     }
     
+    // Parse exclusion list for EXPECT_ANY_EXCEPT: zero or more positions, then
+    // optional #id. An empty list is valid and makes this equivalent to EXPECT_ANY.
+    if (cmd.action == CommandAction::EXPECT_ANY_EXCEPT) {
+        while (*p != '\0' && *p != '#') {
+            const char* tokStart = p;
+            const char* tokEnd = findTokenEnd(p);
+            size_t tokLen = tokEnd - tokStart;
+            char tmp[POSITION_STRING_LENGTH];
+            uint8_t idx = parsePosition(tokStart, tokLen, tmp);
+            if (idx == 255) {
+                m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
+                return false;
+            }
+            cmd.excludeMask |= ((uint64_t)1 << idx);
+            p = skipWhitespace(tokEnd);
+        }
+    }
+    
     // Parse extra numeric value if needed (e.g., sensitivity level)
     if (cmd.action == CommandAction::SET_SENSITIVITY) {
         if (*p == '\0' || *p == '#') {
@@ -284,6 +303,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
+    if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
     if (strcasecmpN(str, "EXPECT_ANY", len)) return CommandAction::EXPECT_ANY;
     if (strcasecmpN(str, "EXPECT", len)) return CommandAction::EXPECT;
     if (strcasecmpN(str, "EXPECT_RELEASE", len)) return CommandAction::EXPECT_RELEASE;
@@ -314,6 +334,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
         case CommandAction::EXPECT_ANY: return "EXPECT_ANY";
+        case CommandAction::EXPECT_ANY_EXCEPT: return "EXPECT_ANY_EXCEPT";
         case CommandAction::EXPECT_RELEASE: return "EXPECT_RELEASE";
         case CommandAction::RECALIBRATE: return "RECALIBRATE";
         case CommandAction::RECALIBRATE_ALL: return "RECALIBRATE_ALL";
@@ -460,6 +481,15 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
         case CommandAction::EXPECT_ANY:
             if (m_touchController) {
                 m_touchController->setExpectAny(cmdId);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+            
+        case CommandAction::EXPECT_ANY_EXCEPT:
+            if (m_touchController) {
+                m_touchController->setExpectAnyExcept(cmd.excludeMask, cmdId);
                 m_eventQueue.queueAck(actionStr, 0, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
