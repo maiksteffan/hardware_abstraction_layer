@@ -31,6 +31,13 @@ StartupController::StartupController(LedController& ledController,
 // ============================================================================
 
 void StartupController::run() {
+    // Step 0 — Emit an early boot banner *before* the long blocking init.
+    // Opening the serial port on the Pi resets the ESP32 (DTR/RTS), so this is
+    // the first thing the Pi sees on (re)connect. It lets the Pi flush its own
+    // buffer and know a fresh handshake is about to start. The Pi may ignore
+    // this line (unknown keyword) or use it to (re)start its handshake routine.
+    m_serial.println("ESP32 BOOT");
+
     // Step 1 — LED initialization + visual-confirmation sweep
     initLeds();
 
@@ -163,19 +170,33 @@ void StartupController::initSensors() {
 // ============================================================================
 
 void StartupController::handshakeLoop() {
-    // Send the first broadcast immediately
+    // Discard any boot-time garbage or partial lines so the line reader starts
+    // on a clean boundary and won't desync on the first real ACK.
+    flushInput();
+
+    // Announce status immediately, then keep re-broadcasting.
     m_serial.println(m_statusMsg);
     uint32_t lastSendTime = millis();
 
     for (;;) {
-        // Non-blockingly read serial input, checking for ACK
+        // Non-blockingly read serial input.
         if (readLine()) {
             if (isAckMatch(m_lineBuf)) {
                 return;  // ACK received — caller will send HARDWARE INITIALISED
             }
+
+            // Any other non-empty line is treated as a Pi-initiated probe /
+            // resync request (e.g. "SYN", a stray newline, or a late greeting
+            // after the Pi connected). Answer immediately with the current
+            // status instead of making the Pi wait for the next interval. This
+            // turns the one-way announcement into a request/response handshake,
+            // which is what lets a late-connecting Pi drive the exchange.
+            m_serial.println(m_statusMsg);
+            lastSendTime = millis();
+            continue;
         }
 
-        // Re-broadcast every STARTUP_HANDSHAKE_INTERVAL_MS
+        // Re-broadcast every STARTUP_HANDSHAKE_INTERVAL_MS as a fallback.
         uint32_t now = millis();
         if (now - lastSendTime >= STARTUP_HANDSHAKE_INTERVAL_MS) {
             m_serial.println(m_statusMsg);
@@ -184,6 +205,14 @@ void StartupController::handshakeLoop() {
 
         delay(1);  // Yield to avoid tight-spinning
     }
+}
+
+void StartupController::flushInput() {
+    // Drain the RX buffer and reset any partially-read line.
+    while (m_serial.available()) {
+        m_serial.read();
+    }
+    m_linePos = 0;
 }
 
 bool StartupController::isAckMatch(const char* line) const {

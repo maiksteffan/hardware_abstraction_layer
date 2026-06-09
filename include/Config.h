@@ -134,7 +134,10 @@ constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
 
 // Startup sequence timing
-constexpr uint32_t STARTUP_HANDSHAKE_INTERVAL_MS = 3000;
+// Re-broadcast the status line frequently so a Pi that connects/opens the port
+// late (which also resets the ESP32 via DTR/RTS) receives a fresh status within
+// a few hundred ms instead of waiting up to several seconds.
+constexpr uint32_t STARTUP_HANDSHAKE_INTERVAL_MS = 500;
 constexpr uint16_t SENSOR_INIT_DELAY_MS = 1500;
 constexpr uint16_t LED_INIT_DELAY_MS = 500;
 constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;

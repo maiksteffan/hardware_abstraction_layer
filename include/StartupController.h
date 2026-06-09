@@ -57,6 +57,10 @@ private:
     void handshakeLoop();
     bool isAckMatch(const char* line) const;
 
+    // Discard any buffered/stale RX bytes (boot noise, partial lines) so the
+    // handshake starts from a clean line boundary.
+    void flushInput();
+
     // Non-blocking serial line reader
     static constexpr uint8_t LINE_BUF_SIZE = 80;
     char m_lineBuf[LINE_BUF_SIZE];
