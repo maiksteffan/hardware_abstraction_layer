@@ -313,6 +313,8 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "SET_SENSITIVITY", len)) return CommandAction::SET_SENSITIVITY;
     if (strcasecmpN(str, "SCAN", len)) return CommandAction::SCAN;
     if (strcasecmpN(str, "SEQUENCE_COMPLETED", len)) return CommandAction::SEQUENCE_COMPLETED;
+    if (strcasecmpN(str, "PLAY_RECORD_ANIMATION", len)) return CommandAction::PLAY_RECORD_ANIMATION;
+    if (strcasecmpN(str, "STOP_RECORD_ANIMATION", len)) return CommandAction::STOP_RECORD_ANIMATION;
     if (strcasecmpN(str, "INFO", len)) return CommandAction::INFO;
     if (strcasecmpN(str, "PING", len)) return CommandAction::PING;
     if (strcasecmpN(str, "CLEAN_QUEUE", len)) return CommandAction::CLEAN_QUEUE;
@@ -342,6 +344,8 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::SET_SENSITIVITY: return "SET_SENSITIVITY";
         case CommandAction::SCAN: return "SCAN";
         case CommandAction::SEQUENCE_COMPLETED: return "SEQUENCE_COMPLETED";
+        case CommandAction::PLAY_RECORD_ANIMATION: return "PLAY_RECORD_ANIMATION";
+        case CommandAction::STOP_RECORD_ANIMATION: return "STOP_RECORD_ANIMATION";
         case CommandAction::INFO: return "INFO";
         case CommandAction::PING: return "PING";
         case CommandAction::CLEAN_QUEUE: return "CLEAN_QUEUE";
@@ -569,6 +573,16 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             break;
             
         case CommandAction::PING:
+            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
+        case CommandAction::PLAY_RECORD_ANIMATION:
+            m_ledController.startRecordAnimation();
+            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
+        case CommandAction::STOP_RECORD_ANIMATION:
+            m_ledController.stopRecordAnimation();
             m_eventQueue.queueAck(actionStr, 0, cmdId);
             break;
             

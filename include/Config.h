@@ -128,7 +128,7 @@ constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 // window resets the timer (see TouchController::pollSensors()), so even
 // repeated short re-contacts keep the touch latched.
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 50;    // short release latch so quick hold-to-hold transitions are detected
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 800;    // short release latch so quick hold-to-hold transitions are detected
 
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
@@ -161,6 +161,7 @@ constexpr uint16_t LED_ANIMATION_STEP_MS = 25;
 constexpr uint16_t LED_BLINK_INTERVAL_MS = 150;
 constexpr uint16_t LED_SEQUENCE_STEP_MS = 10;
 constexpr uint16_t LED_MENU_CHANGE_STEP_MS = 1;
+constexpr uint16_t LED_RECORD_BLINK_INTERVAL_MS = 400;  // Record-animation blink rate
 
 // Animation parameters
 constexpr uint8_t LED_SUCCESS_EXPANSION_RADIUS = 4;
@@ -196,6 +197,11 @@ constexpr uint8_t COLOR_FAIL_B = 0;
 constexpr uint8_t COLOR_OFF_R = 0;
 constexpr uint8_t COLOR_OFF_G = 0;
 constexpr uint8_t COLOR_OFF_B = 0;
+
+// State: RECORD animation (dim white blink across all positions)
+constexpr uint8_t COLOR_RECORD_R = 30;    // Dim white
+constexpr uint8_t COLOR_RECORD_G = 30;
+constexpr uint8_t COLOR_RECORD_B = 30;
 
 // ============================================================================
 // 9. I2C CONFIGURATION

@@ -72,6 +72,9 @@ public:
     void startMenuChangeAnimation(uint8_t r, uint8_t g, uint8_t b, uint8_t range);
     bool isMenuChangeAnimationComplete() const;
     
+    // Record animation (dim white blink across all positions until stopped)
+    void startRecordAnimation();
+    void stopRecordAnimation();
     // State queries
     bool isAnimationComplete(uint8_t position) const;
     bool isContractComplete(uint8_t position) const;
@@ -100,6 +103,11 @@ private:
     uint8_t m_menuChangeR, m_menuChangeG, m_menuChangeB;
     uint32_t m_menuChangeLastTime;
     
+    // Record animation state
+    bool m_recordAnimActive;
+    bool m_recordAnimOn;
+    uint32_t m_recordAnimLastTime;
+    
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
     Adafruit_NeoPixel* getStrip(StripId strip);
@@ -111,6 +119,7 @@ private:
     void updateBlinking(uint32_t nowMillis);
     void updateSequenceCompletedAnimation(uint32_t nowMillis);
     void updateMenuChangeAnimation(uint32_t nowMillis);
+    void updateRecordAnimation(uint32_t nowMillis);
 };
 
 #endif // LED_CONTROLL

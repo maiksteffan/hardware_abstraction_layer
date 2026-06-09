@@ -20,40 +20,40 @@
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 216 },   // H01 ++
-    { StripId::STRIP2, 204 },   // H02 --
-    { StripId::STRIP2, 193 },   // H03 --
-    { StripId::STRIP2, 184 },   // H04 ++
-    { StripId::STRIP1, 193 },   // H05
-    { StripId::STRIP1, 204 },   // H06
-    { StripId::STRIP1, 216 },   // H07 +
-    { StripId::STRIP2, 141 },   // H08 ++
-    { StripId::STRIP2, 152 },   // H09 ++
-    { StripId::STRIP2, 164 },   // H10 ++
-    { StripId::STRIP2, 172 },   // H11 ++
-    { StripId::STRIP1, 171 },   // H12
-    { StripId::STRIP1, 163 },   // H13
-    { StripId::STRIP1, 152 },   // H14
-    { StripId::STRIP1, 141 },   // H15
-    { StripId::STRIP2, 122 },   // H16 ++
-    { StripId::STRIP2, 110 },   // H17 ++
-    { StripId::STRIP2, 100 },   // H18 ++
-    { StripId::STRIP2, 90 },   // H19 ++
-    { StripId::STRIP1, 99 },   // H20
-    { StripId::STRIP1, 111 },   // H21
-    { StripId::STRIP1, 122 },   // H22
-    { StripId::STRIP2, 49 },   // H23 ++
-    { StripId::STRIP2, 60 },   // H24 + ...
-    { StripId::STRIP2, 72 },   // H25 + ..
-    { StripId::STRIP1, 72 },   // H26 
-    { StripId::STRIP1, 60 },   // H27
-    { StripId::STRIP1, 49 },   // H28
-    { StripId::STRIP2, 30 },   // H29 ++
-    { StripId::STRIP2, 18 },   // H30
-    { StripId::STRIP2, 7 },   // H31
-    { StripId::STRIP1, 7 },   // H32
-    { StripId::STRIP1, 18 },   // H33
-    { StripId::STRIP1, 30 },    // H34
+    { StripId::STRIP2, 216 },  
+    { StripId::STRIP2, 204 },   
+    { StripId::STRIP2, 193 },   
+    { StripId::STRIP2, 184 },  
+    { StripId::STRIP1, 193 },   
+    { StripId::STRIP1, 204 },  
+    { StripId::STRIP1, 216 },  
+    { StripId::STRIP2, 141 },   
+    { StripId::STRIP2, 152 },   
+    { StripId::STRIP2, 164 },  
+    { StripId::STRIP2, 172 },  
+    { StripId::STRIP1, 171 },   
+    { StripId::STRIP1, 163 },   
+    { StripId::STRIP1, 152 },   
+    { StripId::STRIP1, 141 },   
+    { StripId::STRIP2, 122 },  
+    { StripId::STRIP2, 110 }, 
+    { StripId::STRIP2, 100 },  
+    { StripId::STRIP2, 90 },  
+    { StripId::STRIP1, 99 },  
+    { StripId::STRIP1, 111 }, 
+    { StripId::STRIP1, 122 }, 
+    { StripId::STRIP2, 49 },  
+    { StripId::STRIP2, 60 },  
+    { StripId::STRIP2, 72 },  
+    { StripId::STRIP1, 72 },
+    { StripId::STRIP1, 60 },
+    { StripId::STRIP1, 49 },  
+    { StripId::STRIP2, 30 },   
+    { StripId::STRIP2, 18 },  
+    { StripId::STRIP2, 7 },  
+    { StripId::STRIP1, 7 }, 
+    { StripId::STRIP1, 18 },   
+    { StripId::STRIP1, 30 },    
    
 };
 
@@ -75,6 +75,9 @@ LedController::LedController()
     , m_menuChangeG(0)
     , m_menuChangeB(0)
     , m_menuChangeLastTime(0)
+    , m_recordAnimActive(false)
+    , m_recordAnimOn(false)
+    , m_recordAnimLastTime(0)
 {
 }
 
@@ -103,6 +106,9 @@ void LedController::begin() {
     m_sequenceAnimActive = false;
     m_menuChangeActive = false;
     m_needsUpdate = false;
+    m_recordAnimActive = false;
+    m_recordAnimOn = false;
+    m_recordAnimLastTime = 0;
 }
 
 void LedController::tick() {
@@ -127,6 +133,10 @@ void LedController::update(uint32_t nowMillis) {
     
     if (m_menuChangeActive) {
         updateMenuChangeAnimation(nowMillis);
+    }
+    
+    if (m_recordAnimActive) {
+        updateRecordAnimation(nowMillis);
     }
     
     if (m_needsUpdate) {
@@ -399,6 +409,32 @@ bool LedController::isMenuChangeAnimationComplete() const {
     return !m_menuChangeActive;
 }
 
+void LedController::startRecordAnimation() {
+    // Stop any other full-strip animations so the record blink owns the strips.
+    m_sequenceAnimActive = false;
+    m_menuChangeActive = false;
+
+    m_strip1.clear();
+    m_strip2.clear();
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+        m_positions[i].state = PositionState::OFF;
+        m_positions[i].animationStep = 0;
+        m_positions[i].blinkOn = false;
+        m_positions[i].expansionRadius = 0;
+    }
+
+    m_recordAnimActive = true;
+    m_recordAnimOn = false;          // updateRecordAnimation() flips it to ON immediately
+    m_recordAnimLastTime = 0;        // force an immediate first toggle
+    m_needsUpdate = true;
+}
+
+void LedController::stopRecordAnimation() {
+    m_recordAnimActive = false;
+    m_recordAnimOn = false;
+    hideAll();
+}
+
 bool LedController::isAnimationComplete(uint8_t position) const {
     if (position >= LED_POSITION_COUNT) return true;
     return m_positions[position].state != PositionState::ANIMATING;
@@ -651,3 +687,30 @@ void LedController::updateMenuChangeAnimation(uint32_t nowMillis) {
         m_menuChangeActive = false;
     }
 }
+
+void LedController::updateRecordAnimation(uint32_t nowMillis) {
+    if (m_recordAnimLastTime != 0 &&
+        nowMillis - m_recordAnimLastTime < LED_RECORD_BLINK_INTERVAL_MS) {
+        return;
+    }
+
+    m_recordAnimOn = !m_recordAnimOn;
+    m_recordAnimLastTime = nowMillis;
+
+    // Blink the center LED of every mapped position in dim white.
+    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+        const LedMapping* mapping = getMapping(i);
+        if (!mapping) continue;
+
+        if (m_recordAnimOn) {
+            setLed(mapping->strip, mapping->index,
+                   COLOR_RECORD_R, COLOR_RECORD_G, COLOR_RECORD_B);
+        } else {
+            setLed(mapping->strip, mapping->index,
+                   COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+        }
+    }
+
+    m_needsUpdate = true;
+}
+
