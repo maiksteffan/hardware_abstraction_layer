@@ -28,6 +28,8 @@
  *   VALUE <pos> [#id]             - Get current sensor delta value
  *   SET_SENSITIVITY <pos> <lvl>   - Set sensitivity (0=most, 7=least)
  *   CLEAN_QUEUE [#id]             - Clear all pending touch expectations
+ *   HANDSOFF_DETECTION_ON [#id]   - Enable HANDS_ON/HANDS_OFF occupancy events
+ *   HANDSOFF_DETECTION_OFF [#id]  - Disable occupancy events
  * 
  * Utility Commands:
  *   PING [#id]                    - Health check
@@ -75,7 +77,9 @@ enum class CommandAction : uint8_t {
     INDICATE_RECORDING,
     INFO,
     PING,
-    CLEAN_QUEUE
+    CLEAN_QUEUE,
+    HANDSOFF_DETECTION_ON,
+    HANDSOFF_DETECTION_OFF
 };
 
 // ============================================================================

@@ -28,7 +28,9 @@ enum class EventType : uint8_t {
     SCANNED,        // Sensor scan complete
     RECALIBRATED,   // Sensor recalibrated
     INFO,           // Firmware info
-    VALUE           // Sensor value response
+    VALUE,          // Sensor value response
+    HANDS_ON,       // Hands-off detection: board went from untouched to touched
+    HANDS_OFF       // Hands-off detection: board went from touched to untouched
 };
 
 // ============================================================================
@@ -74,6 +76,8 @@ public:
     bool queueRecalibrated(const char* position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
     bool queueValue(const char* position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE);
+    bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE);
 
 private:
     Event m_events[QUEUE_SIZE_EVENTS];

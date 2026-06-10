@@ -78,6 +78,11 @@ public:
     void clearExpectAny();
     void clearAllExpectations();  // Clear every pending EXPECT/EXPECT_RELEASE/EXPECT_ANY
     
+    // Hands-off detection. While enabled, emits HANDS_OFF when the number of
+    // touched inputs drops to 0 and HANDS_ON when it rises above 0 again.
+    // Enabling immediately reports the current state once (with commandId).
+    void setHandsOffDetection(bool enabled, uint32_t commandId = COMMAND_ID_NONE);
+    
     // State queries
     bool isInputActive(uint8_t inputIndex) const;     // input's parent sensor is active
     bool isTouched(uint8_t inputIndex) const;
@@ -117,12 +122,16 @@ private:
     bool m_expectAnyUsed[INPUT_COUNT];  // Inputs already reported by EXPECT_ANY
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
+    bool m_handsOffDetectionEnabled;    // HANDSOFF_DETECTION_ON/OFF
+    bool m_lastAnyTouched;              // Last reported board-occupancy state
     
     bool initSensor(uint8_t sensorIndex);
     bool readRegister(uint8_t address, uint8_t reg, uint8_t& value);
     bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
     void pollSensors();
     void processDebounce();
+    void processHandsOffDetection();
+    bool anyInputTouched() const;
 };
 
 #endif // TOUCH_CONTROLLER

@@ -317,6 +317,8 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "INFO", len)) return CommandAction::INFO;
     if (strcasecmpN(str, "PING", len)) return CommandAction::PING;
     if (strcasecmpN(str, "CLEAN_QUEUE", len)) return CommandAction::CLEAN_QUEUE;
+    if (strcasecmpN(str, "HANDSOFF_DETECTION_ON", len)) return CommandAction::HANDSOFF_DETECTION_ON;
+    if (strcasecmpN(str, "HANDSOFF_DETECTION_OFF", len)) return CommandAction::HANDSOFF_DETECTION_OFF;
     return CommandAction::INVALID;
 }
 
@@ -347,6 +349,8 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::INFO: return "INFO";
         case CommandAction::PING: return "PING";
         case CommandAction::CLEAN_QUEUE: return "CLEAN_QUEUE";
+        case CommandAction::HANDSOFF_DETECTION_ON: return "HANDSOFF_DETECTION_ON";
+        case CommandAction::HANDSOFF_DETECTION_OFF: return "HANDSOFF_DETECTION_OFF";
         default: return "INVALID";
     }
 }
@@ -579,9 +583,29 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             m_eventQueue.queueAck(actionStr, 0, cmdId);
             break;
             
+        case CommandAction::HANDSOFF_DETECTION_ON:
+            if (m_touchController) {
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+                // Sends the current state (HANDS_ON/HANDS_OFF) immediately.
+                m_touchController->setHandsOffDetection(true, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+            
+        case CommandAction::HANDSOFF_DETECTION_OFF:
+            if (m_touchController) {
+                m_touchController->setHandsOffDetection(false);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+            
         case CommandAction::CLEAN_QUEUE:
             if (m_touchController) {
                 m_touchController->clearAllExpectations();
+                m_touchController->setHandsOffDetection(false);
             }
             // Drop every stale event still queued from the previous session
             // (e.g. TOUCHED bursts from before CLEAN_QUEUE was issued). They

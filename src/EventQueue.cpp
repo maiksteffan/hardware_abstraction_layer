@@ -244,6 +244,28 @@ bool EventQueue::queueValue(const char* position, int8_t value, uint32_t command
     return enqueue(event);
 }
 
+bool EventQueue::queueHandsOn(uint32_t commandId) {
+    Event event;
+    event.type = EventType::HANDS_ON;
+    event.action[0] = '\0';
+    event.position[0] = '\0';
+    event.commandId = commandId;
+    event.extra[0] = '\0';
+    event.valid = true;
+    return enqueue(event);
+}
+
+bool EventQueue::queueHandsOff(uint32_t commandId) {
+    Event event;
+    event.type = EventType::HANDS_OFF;
+    event.action[0] = '\0';
+    event.position[0] = '\0';
+    event.commandId = commandId;
+    event.extra[0] = '\0';
+    event.valid = true;
+    return enqueue(event);
+}
+
 // ============================================================================
 // Private Methods
 // ============================================================================
@@ -324,6 +346,14 @@ void EventQueue::sendEvent(const Event& event) {
             
         case EventType::VALUE:
             length = snprintf(buffer, sizeof(buffer), "VALUE %s %s", event.position, event.extra);
+            break;
+            
+        case EventType::HANDS_ON:
+            length = snprintf(buffer, sizeof(buffer), "HANDS_ON");
+            break;
+            
+        case EventType::HANDS_OFF:
+            length = snprintf(buffer, sizeof(buffer), "HANDS_OFF");
             break;
     }
     

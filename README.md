@@ -92,6 +92,8 @@ as visual-only confirmation.
 | VALUE | `VALUE H01 [#id]` | `VALUE H01 <delta>` | Get delta (-128 to 127) |
 | SET_SENSITIVITY | `SET_SENSITIVITY H01 <lvl>` | `ACK SET_SENSITIVITY H01` | Set sensitivity (0-7) |
 | CLEAN_QUEUE | `CLEAN_QUEUE [#id]` | `ACK CLEAN_QUEUE` | Clear all pending expectations |
+| HANDSOFF_DETECTION_ON | `HANDSOFF_DETECTION_ON [#id]` | `ACK` → `HANDS_ON`/`HANDS_OFF` | Enable board-occupancy events |
+| HANDSOFF_DETECTION_OFF | `HANDSOFF_DETECTION_OFF [#id]` | `ACK HANDSOFF_DETECTION_OFF` | Disable board-occupancy events |
 
 `EXPECT_ANY_EXCEPT` behaves exactly like `EXPECT_ANY` but ignores any inputs
 listed after the keyword. With no inputs listed it is equivalent to
@@ -100,6 +102,36 @@ for the first touch on any input other than `H01`, `H03`, or `H17`.
 
 > **Note:** CAP1188 sensitivity is global per chip, so `SET_SENSITIVITY` on one
 > input affects every other input mapped to the same physical sensor.
+
+### Hands-off detection
+
+While enabled via `HANDSOFF_DETECTION_ON`, the ESP32 reports board occupancy
+transitions (debounced, across all 34 inputs):
+
+- `HANDS_OFF` — the number of touched inputs dropped to **0**
+- `HANDS_ON` — the number of touched inputs rose **above 0** again
+
+Rules:
+
+- On `HANDSOFF_DETECTION_ON` the ESP32 sends `ACK` followed immediately by the
+  **current** state (`HANDS_ON` or `HANDS_OFF`, tagged with the command's `#id`),
+  so the Pi never waits for a transition that already happened.
+- Subsequent transition events carry no `#id`.
+- Detection is independent of `EXPECT`/`EXPECT_ANY` expectations and does not
+  consume them.
+- `HANDSOFF_DETECTION_OFF` and `CLEAN_QUEUE` both disable detection.
+- Any timeout logic (e.g. "player loses a life after 2 s off the board")
+  belongs on the Pi — the ESP32 only reports occupancy.
+
+```
+Pi  → ESP:  HANDSOFF_DETECTION_ON #9
+ESP → Pi:   ACK HANDSOFF_DETECTION_ON #9
+ESP → Pi:   HANDS_ON #9               (board currently touched)
+ESP → Pi:   HANDS_OFF                 (player let go → Pi starts its timer)
+ESP → Pi:   HANDS_ON                  (player grabbed a hold → Pi cancels timer)
+Pi  → ESP:  HANDSOFF_DETECTION_OFF #10
+ESP → Pi:   ACK HANDSOFF_DETECTION_OFF #10
+```
 
 ### System
 
@@ -117,6 +149,8 @@ for the first touch on any input other than `H01`, `H03`, or `H17`.
 | `DONE <cmd> [pos] [#id]` | Animation complete |
 | `TOUCHED <pos> [#id]` | Touch detected |
 | `TOUCH_RELEASED <pos> [#id]` | Release detected |
+| `HANDS_ON [#id]` | Board occupancy: at least one input touched |
+| `HANDS_OFF [#id]` | Board occupancy: no input touched |
 | `BUSY [#id]` | Queue full, retry later |
 | `ERR <reason> [#id]` | Command failed |
 

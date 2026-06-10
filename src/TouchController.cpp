@@ -24,6 +24,8 @@ TouchController::TouchController()
     , m_expectAnyTail(0)
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
+    , m_handsOffDetectionEnabled(false)
+    , m_lastAnyTouched(false)
 {
     for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
         m_sensors[s].active = false;
@@ -114,6 +116,7 @@ void TouchController::tick() {
 
     pollSensors();
     processDebounce();
+    processHandsOffDetection();
 }
 
 bool TouchController::recalibrate(uint8_t inputIndex) {
@@ -213,6 +216,22 @@ void TouchController::clearAllExpectations() {
         m_expectUp[i].commandId = COMMAND_ID_NONE;
     }
     clearExpectAny();
+}
+
+void TouchController::setHandsOffDetection(bool enabled, uint32_t commandId) {
+    m_handsOffDetectionEnabled = enabled;
+    if (!enabled) return;
+
+    // Report the current state immediately so the Pi never waits for a
+    // transition that already happened (e.g. enabling while board is empty).
+    m_lastAnyTouched = anyInputTouched();
+    if (m_eventQueue) {
+        if (m_lastAnyTouched) {
+            m_eventQueue->queueHandsOn(commandId);
+        } else {
+            m_eventQueue->queueHandsOff(commandId);
+        }
+    }
 }
 
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
@@ -541,5 +560,27 @@ void TouchController::processDebounce() {
                 m_expectUp[i].commandId = COMMAND_ID_NONE;
             }
         }
+    }
+}
+
+bool TouchController::anyInputTouched() const {
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        if (m_inputs[i].debouncedTouched) return true;
+    }
+    return false;
+}
+
+void TouchController::processHandsOffDetection() {
+    if (!m_handsOffDetectionEnabled) return;
+
+    bool any = anyInputTouched();
+    if (any == m_lastAnyTouched) return;
+    m_lastAnyTouched = any;
+
+    if (!m_eventQueue) return;
+    if (any) {
+        m_eventQueue->queueHandsOn();
+    } else {
+        m_eventQueue->queueHandsOff();
     }
 }
