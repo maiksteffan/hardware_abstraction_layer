@@ -114,7 +114,9 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 
 constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
 constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
-constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
+//FUER FINNI:
+constexpr uint8_t INPUT_COUNT = 5; 
+//constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
 
 // Length of a position string including null terminator (e.g. "H01\0")
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
@@ -270,6 +272,7 @@ struct InputMapping {
     uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1
 };
 
+/*
 constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H01..H07  -> sensor 0, channels 0..6
     {1,3}, {1,5}, {1,6}, {2,1}, {2,6}, {3,1}, {3,5},
@@ -283,6 +286,16 @@ constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     {0,0}, {0,2}, {0,1}, {4,0}, {4,1}, {4,3}
     // TODO (user): edit this default layout to match the real wiring.
 };
+*/
+
+
+//FÜR FINNI:
+constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
+    // H01..H07  -> sensor 0, channels 0..6
+    //imagine I only have 5 sensors with only one channel each, so I just map everything to channel 0 of different sensors
+    {0,0}, {1,0}, {2,0}, {3,0}, {4,0}, {0,0}, {1,0},
+};
+
 
 // ============================================================================
 // 11. PROTOCOL CONSTANTS
