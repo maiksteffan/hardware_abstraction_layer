@@ -171,6 +171,12 @@ constexpr uint8_t LED_SEQUENCE_PULSE_COUNT = 2;
 constexpr uint16_t LED_SEQUENCE_PULSE_STEPS = 20;
 constexpr uint8_t LED_SEQUENCE_MAX_BRIGHTNESS = 40;
 
+// DEFEAT_ANIMATION: red full-board pulses (same step timing as sequence anim)
+constexpr uint8_t LED_DEFEAT_PULSE_COUNT = 3;
+constexpr uint16_t LED_DEFEAT_PULSE_STEPS = 20;
+constexpr uint8_t LED_DEFEAT_MAX_BRIGHTNESS = 40;
+constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
+
 // ============================================================================
 // 8. COLORS (RGB format, 0-255 per channel)
 // ============================================================================

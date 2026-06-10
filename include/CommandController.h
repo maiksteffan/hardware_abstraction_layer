@@ -16,6 +16,7 @@
  *   CONTRACT_STEP <pos> [#id]     - Contract lit area by 1 LED on each side
  *   MENUE_CHANGE <r,g,b> <range>  - Expand animation on both strips from 0 to range
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
+ *   DEFEAT_ANIMATION [#id]        - Play defeat animation (red full-board pulses)
  *   INDICATE_RECORDING [#id]      - Light all positions static dim white (clear with HIDE_ALL)
  * 
  * Touch Commands:
@@ -74,6 +75,7 @@ enum class CommandAction : uint8_t {
     SET_SENSITIVITY,
     SCAN,
     SEQUENCE_COMPLETED,
+    DEFEAT_ANIMATION,
     INDICATE_RECORDING,
     INFO,
     PING,

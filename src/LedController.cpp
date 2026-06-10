@@ -85,6 +85,9 @@ LedController::LedController()
     , m_sequenceAnimStep(0)
     , m_sequenceAnimLastTime(0)
     , m_needsUpdate(false)
+    , m_defeatAnimActive(false)
+    , m_defeatAnimStep(0)
+    , m_defeatAnimLastTime(0)
     , m_menuChangeActive(false)
     , m_menuChangeStep(0)
     , m_menuChangeRange(0)
@@ -118,6 +121,7 @@ void LedController::begin() {
     }
     
     m_sequenceAnimActive = false;
+    m_defeatAnimActive = false;
     m_menuChangeActive = false;
     m_needsUpdate = false;
 }
@@ -140,6 +144,10 @@ void LedController::update(uint32_t nowMillis) {
     
     if (m_sequenceAnimActive) {
         updateSequenceCompletedAnimation(nowMillis);
+    }
+    
+    if (m_defeatAnimActive) {
+        updateDefeatAnimation(nowMillis);
     }
     
     if (m_menuChangeActive) {
@@ -391,6 +399,20 @@ bool LedController::isSequenceCompletedAnimationComplete() const {
     return !m_sequenceAnimActive;
 }
 
+void LedController::startDefeatAnimation() {
+    m_defeatAnimActive = true;
+    m_defeatAnimStep = 0;
+    m_defeatAnimLastTime = millis();
+    
+    m_strip1.clear();
+    m_strip2.clear();
+    m_needsUpdate = true;
+}
+
+bool LedController::isDefeatAnimationComplete() const {
+    return !m_defeatAnimActive;
+}
+
 void LedController::startMenuChangeAnimation(uint8_t r, uint8_t g, uint8_t b, uint8_t range) {
     m_menuChangeActive = true;
     m_menuChangeStep = 0;
@@ -414,6 +436,7 @@ void LedController::indicateRecording() {
     // Light every mapped position in static dim white. Stays lit until a
     // subsequent command (e.g. HIDE_ALL) clears the strips.
     m_sequenceAnimActive = false;
+    m_defeatAnimActive = false;
     m_menuChangeActive = false;
 
     m_strip1.clear();
@@ -656,6 +679,49 @@ void LedController::updateSequenceCompletedAnimation(uint32_t nowMillis) {
     }
     for (uint16_t i = 0; i < LED_STRIP_2_LENGTH; i++) {
         m_strip2.setPixelColor(i, m_strip2.Color(0, brightness, 0));
+    }
+    m_needsUpdate = true;
+}
+
+void LedController::updateDefeatAnimation(uint32_t nowMillis) {
+    if (nowMillis - m_defeatAnimLastTime < LED_DEFEAT_STEP_MS) return;
+    
+    m_defeatAnimStep++;
+    m_defeatAnimLastTime = nowMillis;
+    
+    uint16_t totalSteps = LED_DEFEAT_PULSE_COUNT * LED_DEFEAT_PULSE_STEPS * 2;
+    
+    if (m_defeatAnimStep >= totalSteps) {
+        m_strip1.clear();
+        m_strip2.clear();
+        m_needsUpdate = true;
+        
+        for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+            m_positions[i].state = PositionState::OFF;
+            m_positions[i].animationStep = 0;
+        }
+        
+        m_defeatAnimActive = false;
+        return;
+    }
+    
+    uint16_t stepsPerPulse = LED_DEFEAT_PULSE_STEPS * 2;
+    uint16_t posInPulse = m_defeatAnimStep % stepsPerPulse;
+    
+    uint8_t brightness;
+    if (posInPulse < LED_DEFEAT_PULSE_STEPS) {
+        brightness = (posInPulse * LED_DEFEAT_MAX_BRIGHTNESS) / LED_DEFEAT_PULSE_STEPS;
+    } else {
+        uint16_t fadeOutPos = posInPulse - LED_DEFEAT_PULSE_STEPS;
+        brightness = LED_DEFEAT_MAX_BRIGHTNESS - (fadeOutPos * LED_DEFEAT_MAX_BRIGHTNESS) / LED_DEFEAT_PULSE_STEPS;
+    }
+    
+    // Red full-board pulse
+    for (uint16_t i = 0; i < LED_STRIP_1_LENGTH; i++) {
+        m_strip1.setPixelColor(i, m_strip1.Color(brightness, 0, 0));
+    }
+    for (uint16_t i = 0; i < LED_STRIP_2_LENGTH; i++) {
+        m_strip2.setPixelColor(i, m_strip2.Color(brightness, 0, 0));
     }
     m_needsUpdate = true;
 }

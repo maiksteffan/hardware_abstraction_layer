@@ -313,6 +313,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "SET_SENSITIVITY", len)) return CommandAction::SET_SENSITIVITY;
     if (strcasecmpN(str, "SCAN", len)) return CommandAction::SCAN;
     if (strcasecmpN(str, "SEQUENCE_COMPLETED", len)) return CommandAction::SEQUENCE_COMPLETED;
+    if (strcasecmpN(str, "DEFEAT_ANIMATION", len)) return CommandAction::DEFEAT_ANIMATION;
     if (strcasecmpN(str, "INDICATE_RECORDING", len)) return CommandAction::INDICATE_RECORDING;
     if (strcasecmpN(str, "INFO", len)) return CommandAction::INFO;
     if (strcasecmpN(str, "PING", len)) return CommandAction::PING;
@@ -345,6 +346,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::SET_SENSITIVITY: return "SET_SENSITIVITY";
         case CommandAction::SCAN: return "SCAN";
         case CommandAction::SEQUENCE_COMPLETED: return "SEQUENCE_COMPLETED";
+        case CommandAction::DEFEAT_ANIMATION: return "DEFEAT_ANIMATION";
         case CommandAction::INDICATE_RECORDING: return "INDICATE_RECORDING";
         case CommandAction::INFO: return "INFO";
         case CommandAction::PING: return "PING";
@@ -382,6 +384,7 @@ bool CommandController::actionIsLongRunning(CommandAction action) {
         case CommandAction::SUCCESS:
         case CommandAction::CONTRACT:
         case CommandAction::SEQUENCE_COMPLETED:
+        case CommandAction::DEFEAT_ANIMATION:
         case CommandAction::MENUE_CHANGE:
             return true;
         default:
@@ -641,6 +644,8 @@ bool CommandController::queueCommand(const ParsedCommand& cmd) {
                 m_ledController.contract(cmd.positionIndex);
             } else if (cmd.action == CommandAction::SEQUENCE_COMPLETED) {
                 m_ledController.startSequenceCompletedAnimation();
+            } else if (cmd.action == CommandAction::DEFEAT_ANIMATION) {
+                m_ledController.startDefeatAnimation();
             } else if (cmd.action == CommandAction::MENUE_CHANGE) {
                 m_ledController.startMenuChangeAnimation(cmd.r, cmd.g, cmd.b, cmd.range);
             }
@@ -675,6 +680,13 @@ void CommandController::tickCommand(QueuedCommand& qc) {
             
         case CommandAction::SEQUENCE_COMPLETED:
             if (m_ledController.isSequenceCompletedAnimationComplete()) {
+                m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
+                qc.active = false;
+            }
+            break;
+            
+        case CommandAction::DEFEAT_ANIMATION:
+            if (m_ledController.isDefeatAnimationComplete()) {
                 m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
                 qc.active = false;
             }

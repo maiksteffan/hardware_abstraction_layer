@@ -76,6 +76,7 @@ as visual-only confirmation.
 | EXPAND_STEP | `EXPAND_STEP H01 [#id]` | `ACK EXPAND_STEP H01` | Expand by 1 LED each side |
 | CONTRACT_STEP | `CONTRACT_STEP H01 [#id]` | `ACK CONTRACT_STEP H01` | Shrink by 1 LED each side |
 | SEQUENCE_COMPLETED | `SEQUENCE_COMPLETED [#id]` | `ACK` → `DONE` | Celebration animation |
+| DEFEAT_ANIMATION | `DEFEAT_ANIMATION [#id]` | `ACK` → `DONE` | Defeat animation (3 red full-board pulses) |
 | MENUE_CHANGE | `MENUE_CHANGE r,g,b range` | `ACK MENUE_CHANGE` | Color sweep (e.g. `255,0,0 50`) |
 | INDICATE_RECORDING | `INDICATE_RECORDING [#id]` | `ACK INDICATE_RECORDING` | Light all positions static dim white (clear with `HIDE_ALL`) |
 

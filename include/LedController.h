@@ -77,6 +77,10 @@ public:
     void startSequenceCompletedAnimation();
     bool isSequenceCompletedAnimationComplete() const;
     
+    // Defeat animation (red full-board pulses)
+    void startDefeatAnimation();
+    bool isDefeatAnimationComplete() const;
+    
     // Menu change animation
     void startMenuChangeAnimation(uint8_t r, uint8_t g, uint8_t b, uint8_t range);
     bool isMenuChangeAnimationComplete() const;
@@ -104,6 +108,11 @@ private:
     uint32_t m_sequenceAnimLastTime;
     bool m_needsUpdate;
     
+    // Defeat animation state
+    bool m_defeatAnimActive;
+    uint16_t m_defeatAnimStep;
+    uint32_t m_defeatAnimLastTime;
+    
     // Menu change animation state
     bool m_menuChangeActive;
     uint8_t m_menuChangeStep;
@@ -125,6 +134,7 @@ private:
     void updateContractAnimation(uint8_t position, uint32_t nowMillis);
     void updateBlinking(uint32_t nowMillis);
     void updateSequenceCompletedAnimation(uint32_t nowMillis);
+    void updateDefeatAnimation(uint32_t nowMillis);
     void updateMenuChangeAnimation(uint32_t nowMillis);
 };
 
