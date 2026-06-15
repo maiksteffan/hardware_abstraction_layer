@@ -29,24 +29,24 @@
 
 #define FIRMWARE_VERSION "2.3.0"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
-#define BOARD_TYPE "ESP32_WROOM"
+#define BOARD_TYPE "ESP32_S3_DEVKITC_1"
 
 // ============================================================================
-// 2. HARDWARE PINS (ESP32 WROOM GPIO)
+// 2. HARDWARE PINS (ESP32-S3-DevKitC-1 GPIO)
 // ============================================================================
-// Safe GPIO pins for ESP32:
-// - Avoid GPIO 0, 2 (boot strapping)
-// - Avoid GPIO 6-11 (flash)
-// - Avoid GPIO 34-39 (input only)
+// Safe GPIO pins for ESP32-S3:
+// - Avoid GPIO 0 (boot strapping), GPIO 3, 45, 46 (strapping)
+// - Avoid GPIO 26-32 (SPI flash/PSRAM on N8R8 octal modules)
+// - Avoid GPIO 19/20 (native USB D-/D+ if used)
 // ============================================================================
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
-constexpr uint8_t PIN_LED_STRIP_2 = 19;  // GPIO19 - VSPI MISO
+constexpr uint8_t PIN_LED_STRIP_1 = 17;  // GPIO17 - LED data 1
+constexpr uint8_t PIN_LED_STRIP_2 = 18;  // GPIO18 - LED data 2
 
 // I2C Pins
-constexpr uint8_t PIN_I2C_SDA = 21;  // Default ESP32 SDA
-constexpr uint8_t PIN_I2C_SCL = 22;  // Default ESP32 SCL
+constexpr uint8_t PIN_I2C_SDA = 7;  // GPIO7 - SDA
+constexpr uint8_t PIN_I2C_SCL = 6;  // GPIO6 - SCL
 
 // ============================================================================
 // 3. FREERTOS TASK CONFIGURATION
@@ -115,8 +115,8 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
 constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
 //FUER FINNI:
-constexpr uint8_t INPUT_COUNT = 5; 
-//constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
+//constexpr uint8_t INPUT_COUNT = 5; 
+constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
 
 // Length of a position string including null terminator (e.g. "H01\0")
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
@@ -272,7 +272,7 @@ struct InputMapping {
     uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1
 };
 
-/*
+
 constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H01..H07  -> sensor 0, channels 0..6
     {1,3}, {1,5}, {1,6}, {2,1}, {2,6}, {3,1}, {3,5},
@@ -285,15 +285,6 @@ constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)
     {0,0}, {0,2}, {0,1}, {4,0}, {4,1}, {4,3}
     // TODO (user): edit this default layout to match the real wiring.
-};
-*/
-
-
-//FÜR FINNI:
-constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
-    // H01..H07  -> sensor 0, channels 0..6
-    //imagine I only have 5 sensors with only one channel each, so I just map everything to channel 0 of different sensors
-    {0,0}, {1,0}, {2,0}, {3,0}, {4,0}, {0,0}, {1,0},
 };
 
 
