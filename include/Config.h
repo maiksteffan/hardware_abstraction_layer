@@ -29,7 +29,9 @@
 
 #define FIRMWARE_VERSION "2.3.0"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
+#ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
+#endif
 
 // ============================================================================
 // 2. HARDWARE PINS (ESP32-S3-DevKitC-1 GPIO)
@@ -40,14 +42,26 @@
 // - Avoid GPIO 19/20 (native USB D-/D+ if used)
 // ============================================================================
 
+// Pin defaults below target the ESP32-S3-DevKitC-1. They can be overridden per
+// board via platformio.ini build_flags (e.g. -DPIN_I2C_SDA=21) without editing
+// this file — see the [env:esp32dev] section for the classic ESP32 WROOM.
+
 // LED Strip Data Pins
-// Two separate strips for better power distribution and simpler wiring; see
-constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO17 - LED data 1
-constexpr uint8_t PIN_LED_STRIP_2 = 17;  // GPIO18 - LED data 2
+// Two separate strips for better power distribution and simpler wiring.
+#ifndef PIN_LED_STRIP_1
+#define PIN_LED_STRIP_1 18  // GPIO18 - LED data 1
+#endif
+#ifndef PIN_LED_STRIP_2
+#define PIN_LED_STRIP_2 17  // GPIO17 - LED data 2
+#endif
 
 // I2C Pins
-constexpr uint8_t PIN_I2C_SDA = 7;  // GPIO7 - SDA
-constexpr uint8_t PIN_I2C_SCL = 6;  // GPIO6 - SCL
+#ifndef PIN_I2C_SDA
+#define PIN_I2C_SDA 7  // GPIO7 - SDA
+#endif
+#ifndef PIN_I2C_SCL
+#define PIN_I2C_SCL 6  // GPIO6 - SCL
+#endif
 
 // ============================================================================
 // 3. FREERTOS TASK CONFIGURATION
