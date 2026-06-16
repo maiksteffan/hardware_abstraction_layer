@@ -16,7 +16,7 @@
 
 StartupController::StartupController(LedController& ledController,
                                      TouchController& touchController,
-                                     HardwareSerial& serial)
+                                     Stream& serial)
     : m_ledController(ledController)
     , m_touchController(touchController)
     , m_serial(serial)

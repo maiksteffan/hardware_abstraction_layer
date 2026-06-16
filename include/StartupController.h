@@ -26,7 +26,7 @@ class StartupController {
 public:
     StartupController(LedController& ledController,
                       TouchController& touchController,
-                      HardwareSerial& serial);
+                      Stream& serial);
 
     /**
      * @brief Run full startup sequence (blocks until HARDWARE INITIALISED is sent)
@@ -41,7 +41,7 @@ public:
 private:
     LedController& m_ledController;
     TouchController& m_touchController;
-    HardwareSerial& m_serial;
+    Stream& m_serial;
 
     // Single status message (e.g. "SENSORS READY" or "SENSORS FAILED [A,B]")
     char m_statusMsg[64];
