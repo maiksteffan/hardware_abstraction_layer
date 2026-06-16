@@ -41,8 +41,9 @@
 // ============================================================================
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 17;  // GPIO17 - LED data 1
-constexpr uint8_t PIN_LED_STRIP_2 = 18;  // GPIO18 - LED data 2
+// Two separate strips for better power distribution and simpler wiring; see
+constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO17 - LED data 1
+constexpr uint8_t PIN_LED_STRIP_2 = 17;  // GPIO18 - LED data 2
 
 // I2C Pins
 constexpr uint8_t PIN_I2C_SDA = 7;  // GPIO7 - SDA
