@@ -27,7 +27,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "2.3.0"
+#define FIRMWARE_VERSION "1.0.0"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
