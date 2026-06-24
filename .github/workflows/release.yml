@@ -15,6 +15,12 @@ on:
 permissions:
   contents: write
 
+# PlatformIO env to build for the release. The deployed boards are classic
+# ESP32 (WROOM), so build esp32dev — NOT the platformio.ini default (which is
+# the ESP32-S3 dev env used for local work).
+env:
+  PIO_ENV: esp32dev
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -41,15 +47,14 @@ jobs:
             exit 1
           fi
 
-      - name: Build firmware (default env)
-        run: pio run
+      - name: Build firmware ($PIO_ENV)
+        run: pio run -e "$PIO_ENV"
 
       - name: Merge into a single flashable binary
         run: |
           set -euo pipefail
-          # `pio run` builds the env named in default_envs into .pio/build/<env>/.
-          BUILD_DIR="$(ls -d .pio/build/*/ | head -n1)"
-          ENV="$(basename "$BUILD_DIR")"
+          BUILD_DIR=".pio/build/$PIO_ENV/"
+          ENV="$PIO_ENV"
           echo "Build dir: $BUILD_DIR (env: $ENV)"
           ls -la "$BUILD_DIR"
           # Derive the chip family from the env name so the bootloader offset is
