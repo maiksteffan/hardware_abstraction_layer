@@ -27,7 +27,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.0.3"
+#define FIRMWARE_VERSION "1.0.2"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -47,8 +47,13 @@
 // this file — see the [env:esp32dev] section for the classic ESP32 WROOM.
 
 // LED Strip Data Pins
-constexpr uint8_t PIN_LED_STRIP_1 = 18;  // GPIO18 - VSPI CLK
-constexpr uint8_t PIN_LED_STRIP_2 = 25;  // GPIO25 (was 19 in migration, reverted to match hardware wiring)
+// Two separate strips for better power distribution and simpler wiring.
+#ifndef PIN_LED_STRIP_1
+#define PIN_LED_STRIP_1 17  // GPIO18 - LED data 1
+#endif
+#ifndef PIN_LED_STRIP_2
+#define PIN_LED_STRIP_2 18  // GPIO17 - LED data 2
+#endif
 
 // I2C Pins
 #ifndef PIN_I2C_SDA
@@ -122,10 +127,11 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // 6. TOUCH SENSING
 // ============================================================================
 
-constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // 5 GripSense v1.0 boards (SMEC CT188-1)
+constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
 constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
-constexpr uint8_t INPUT_COUNT = 5;                   // matches TOUCH_SENSOR_COUNT for single-channel mode
-//constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
+//FUER FINNI:
+//constexpr uint8_t INPUT_COUNT = 5; 
+constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
 
 // Length of a position string including null terminator (e.g. "H01\0")
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
@@ -161,11 +167,11 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
 
 #ifndef LED_STRIP_1_LENGTH
-#define LED_STRIP_1_LENGTH 64
+#define LED_STRIP_1_LENGTH 260
 #endif
 
 #ifndef LED_STRIP_2_LENGTH
-#define LED_STRIP_2_LENGTH 64
+#define LED_STRIP_2_LENGTH 260
 #endif
 
 constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 255;  // 0-255
@@ -262,14 +268,8 @@ constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 // 10. SENSOR I2C ADDRESSES (one per physical CAP1188 chip)
 // ============================================================================
 
-// GripSense v1.0 boards use SMEC CT188-1 (CAP1188 clone) at non-standard addresses.
-// The DIP switch "A B C D" bank sets the address offset; base is ~0x18 (not 0x28 like genuine CAP1188).
-// Run an I2C scan to find addresses for any board not yet wired in.
-// 0x3F found on bus is an unrelated device (display backpack), NOT a sensor.
-// GripSense v1.0 (SMEC CT188-1). Adresse = Buchstaben-Basis + rechte DIP-Ziffer.
-// D-Basis=0x1C, B-Basis=0x3C. Board-Mapping: D(0x1C), C(0x1D), B(0x1E), A(0x1F), E(0x3F)
 constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
-    0x1C, 0x1D, 0x1E, 0x1F, 0x3F
+    0x28, 0x29, 0x2A, 0x2B, 0x2C
 };
 
 // ============================================================================
@@ -300,12 +300,6 @@ constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
     // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)
     {0,0}, {0,2}, {0,1}, {4,0}, {4,1}, {4,3}
     // TODO (user): edit this default layout to match the real wiring.
-};
-*/
-
-
-constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
-    {0,0}, {1,0}, {2,0}, {3,0}, {4,0}  // H01=0x1C, H02=0x1D, H03=0x1E, H04=0x1F, H05=0x3F
 };
 
 
