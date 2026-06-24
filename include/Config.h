@@ -49,10 +49,10 @@
 // LED Strip Data Pins
 // Two separate strips for better power distribution and simpler wiring.
 #ifndef PIN_LED_STRIP_1
-#define PIN_LED_STRIP_1 18  // GPIO18 - LED data 1
+#define PIN_LED_STRIP_1 17  // GPIO18 - LED data 1
 #endif
 #ifndef PIN_LED_STRIP_2
-#define PIN_LED_STRIP_2 17  // GPIO17 - LED data 2
+#define PIN_LED_STRIP_2 18  // GPIO17 - LED data 2
 #endif
 
 // I2C Pins
@@ -174,7 +174,7 @@ constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
 #define LED_STRIP_2_LENGTH 260
 #endif
 
-constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 128;  // 0-255
+constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 255;  // 0-255
 
 // Animation timing (milliseconds)
 constexpr uint16_t LED_ANIMATION_STEP_MS = 25;
