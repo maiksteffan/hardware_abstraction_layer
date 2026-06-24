@@ -1,0 +1,59 @@
+name: Build & Release Firmware
+
+# Build the firmware and publish a flashable, merged binary whenever a semver
+# tag is pushed. The Raspberry Pi downloads this `firmware-merged.bin` asset and
+# flashes the ESP32 over USB with esptool (see the backend's
+# firmware_update_service). The merged image is based at 0x0, so the Pi can flash
+# it with `write_flash 0x0` regardless of the board (ESP32 WROOM or ESP32-S3).
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO & esptool
+        run: pip install platformio esptool
+
+      - name: Verify FIRMWARE_VERSION matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FW="$(grep -oP '#define\s+FIRMWARE_VERSION\s+"\K[^"]+' include/Config.h)"
+          echo "Tag version:      $TAG"
+          echo "Firmware version: $FW"
+          if [ "$TAG" != "$FW" ]; then
+            echo "::error::FIRMWARE_VERSION ($FW) in include/Config.h does not match tag ($TAG). Bump Config.h before tagging."
+            exit 1
+          fi
+
+      - name: Build firmware (default env)
+        run: pio run
+
+      - name: Merge into a single flashable binary
+        run: |
+          set -euo pipefail
+          # `pio run` builds the env(s) named in default_envs. Locate the build
+          # directory that PlatformIO produced (it contains flasher_args.json).
+          BUILD_DIR="$(dirname "$(find .pio/build -name flasher_args.json | head -n1)")"
+          echo "Build dir: $BUILD_DIR"
+          python .github/scripts/merge_firmware.py "$BUILD_DIR" firmware-merged.bin
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware-merged.bin
+          generate_release_notes: true
