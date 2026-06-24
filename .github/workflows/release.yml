@@ -28,7 +28,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install PlatformIO & esptool
-        run: pip install platformio esptool
+        run: pip install platformio "esptool<5"
 
       - name: Verify FIRMWARE_VERSION matches tag
         run: |
@@ -47,11 +47,23 @@ jobs:
       - name: Merge into a single flashable binary
         run: |
           set -euo pipefail
-          # `pio run` builds the env(s) named in default_envs. Locate the build
-          # directory that PlatformIO produced (it contains flasher_args.json).
-          BUILD_DIR="$(dirname "$(find .pio/build -name flasher_args.json | head -n1)")"
-          echo "Build dir: $BUILD_DIR"
-          python .github/scripts/merge_firmware.py "$BUILD_DIR" firmware-merged.bin
+          # `pio run` builds the env named in default_envs into .pio/build/<env>/.
+          BUILD_DIR="$(ls -d .pio/build/*/ | head -n1)"
+          ENV="$(basename "$BUILD_DIR")"
+          echo "Build dir: $BUILD_DIR (env: $ENV)"
+          ls -la "$BUILD_DIR"
+          # Derive the chip family from the env name so the bootloader offset is
+          # correct (esp32-s3-devkitc-1 -> esp32s3 @ 0x0, esp32dev -> esp32 @ 0x1000).
+          case "$ENV" in
+            *s3*) CHIP=esp32s3 ;;
+            *s2*) CHIP=esp32s2 ;;
+            *c3*) CHIP=esp32c3 ;;
+            *c6*) CHIP=esp32c6 ;;
+            *h2*) CHIP=esp32h2 ;;
+            *)    CHIP=esp32 ;;
+          esac
+          echo "Chip: $CHIP"
+          python .github/scripts/merge_firmware.py "$BUILD_DIR" firmware-merged.bin "$CHIP"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2

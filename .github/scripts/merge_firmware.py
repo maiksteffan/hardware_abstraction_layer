@@ -1,41 +1,79 @@
 #!/usr/bin/env python3
-"""Merge a PlatformIO build into a single flashable binary.
+"""Merge a PlatformIO ESP32 build into a single, 0x0-flashable binary.
 
-Reads `flasher_args.json` from a PlatformIO build directory and runs
-`esptool merge_bin` with the exact chip, flash flags and offset->file map that
-PlatformIO produced. This keeps the merge correct regardless of the board
-(ESP32 WROOM vs ESP32-S3) without hardcoding offsets.
+Usage: merge_firmware.py <build_dir> <output.bin> [chip]
 
-Usage: merge_firmware.py <build_dir> <output.bin>
+The Raspberry Pi flashes the resulting image with `write_flash 0x0`, so this
+merges the bootloader, partition table, boot_app0 and application into one file
+based at 0x0. The bootloader flash offset depends on the chip (0x0 for the
+S3/C-series, 0x1000 for the classic ESP32 / S2), so it is derived from `chip`
+(default: esp32s3, the firmware's default board).
+
+PlatformIO's Arduino builds do NOT emit flasher_args.json (that is an ESP-IDF
+artifact), and boot_app0.bin lives in the framework package rather than the
+build directory — both handled here.
 """
 
-import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Bootloader flash offset per chip family.
+BOOTLOADER_OFFSET = {
+    "esp32": "0x1000",
+    "esp32s2": "0x1000",
+    "esp32s3": "0x0",
+    "esp32c3": "0x0",
+    "esp32c6": "0x0",
+    "esp32h2": "0x0",
+}
+
+
+def find_boot_app0(build_dir: Path) -> str:
+    """boot_app0.bin ships in the framework package, not the build dir."""
+    local = build_dir / "boot_app0.bin"
+    if local.exists():
+        return str(local)
+    search_roots = [
+        Path(os.path.expanduser("~")) / ".platformio" / "packages",
+        Path("/home/runner/.platformio/packages"),
+    ]
+    for root in search_roots:
+        if root.exists():
+            hits = list(root.rglob("boot_app0.bin"))
+            if hits:
+                return str(hits[0])
+    raise FileNotFoundError("boot_app0.bin not found in build dir or PlatformIO packages")
 
 
 def main() -> int:
     build_dir = Path(sys.argv[1])
     output = Path(sys.argv[2]).resolve()
+    chip = sys.argv[3] if len(sys.argv) > 3 else "esp32s3"
+    boot_offset = BOOTLOADER_OFFSET.get(chip, "0x0")
 
-    args = json.loads((build_dir / "flasher_args.json").read_text())
-    chip = args.get("extra_esptool_args", {}).get("chip", "esp32")
-    write_args = args.get("write_flash_args", [])
-    flash_files = args["flash_files"]  # {offset: filename}
+    bootloader = build_dir / "bootloader.bin"
+    partitions = build_dir / "partitions.bin"
+    firmware = build_dir / "firmware.bin"
+    for f in (bootloader, partitions, firmware):
+        if not f.exists():
+            raise FileNotFoundError(f"missing build artifact: {f}")
+    boot_app0 = find_boot_app0(build_dir)
 
     cmd = [
         sys.executable, "-m", "esptool",
         "--chip", chip,
         "merge_bin",
         "-o", str(output),
-        *write_args,
+        boot_offset, str(bootloader),
+        "0x8000", str(partitions),
+        "0xe000", boot_app0,
+        "0x10000", str(firmware),
     ]
-    for offset, filename in flash_files.items():
-        cmd += [offset, filename]
-
+    print(f"chip={chip} bootloader@{boot_offset}")
     print("Running:", " ".join(cmd))
-    subprocess.run(cmd, check=True, cwd=build_dir)
+    subprocess.run(cmd, check=True)
     return 0
 
 
