@@ -147,6 +147,52 @@ constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 800;    // short release latch so quick hold-to-hold transitions are detected
 
+// ----------------------------------------------------------------------------
+// 6b. EXPECT_ANY QUALIFICATION (brush-by rejection for climbing holds)
+// ----------------------------------------------------------------------------
+// EXPECT <pos> stays instant (only the expected hold is armed, so false
+// positives are impossible). EXPECT_ANY arms ALL inputs, so a hand/arm
+// brushing past a hold must not count as a grab. A new touch is therefore
+// only reported through EXPECT_ANY after it passes a short qualification
+// window that checks:
+//   1. Persistence: raw contact must not drop out during the window.
+//   2. Delta consistency: the CAP1188 delta count must stay "grab-strong"
+//      for most samples (a brush-by spikes and decays).
+//   3. Plausibility: >=3 new press edges within the sweep window means an
+//      arm is sweeping across the wall - all decisions are deferred until
+//      the sweep holdoff expires (brush-bys release and are dropped; real
+//      grabs persist and are reported afterwards).
+// The Pi-facing protocol is unchanged; TOUCHED just arrives ~CONFIRM_MS later.
+// ----------------------------------------------------------------------------
+
+// How long a new contact must persist before EXPECT_ANY reports it.
+constexpr uint16_t EXPECT_ANY_CONFIRM_MS = 150;
+
+// Raw-contact dropout tolerance: this many CONSECUTIVE poll samples
+// (TOUCH_POLL_INTERVAL_MS each) without contact cancels the candidate.
+constexpr uint8_t EXPECT_ANY_DROPOUT_SAMPLES = 3;
+
+// Minimum CAP1188 delta count for a sample to count as "grab-strong".
+// (Chip default touch threshold is 0x40 = 64; a solid grab saturates well
+// above it, a brush-by hovers near/below it.) Set to 0 to disable the
+// delta check and rely on persistence only.
+constexpr int8_t EXPECT_ANY_DELTA_MIN = 48;
+
+// Fraction (percent) of delta samples in the window that must be
+// grab-strong for the touch to qualify.
+constexpr uint8_t EXPECT_ANY_DELTA_GOOD_PCT = 70;
+
+// Arm-sweep detection: this many new press edges within the window below
+// is considered a sweep (max 2 real simultaneous grabs are possible).
+constexpr uint8_t EXPECT_ANY_SWEEP_TOUCH_COUNT = 3;
+constexpr uint16_t EXPECT_ANY_SWEEP_WINDOW_MS = 500;
+
+// While a sweep is detected, EXPECT_ANY decisions are deferred this long.
+constexpr uint16_t EXPECT_ANY_SWEEP_HOLDOFF_MS = 400;
+
+// Size of the press-edge timestamp ring used for sweep detection.
+constexpr uint8_t EXPECT_ANY_EDGE_RING_SIZE = 8;
+
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
 

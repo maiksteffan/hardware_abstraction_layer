@@ -47,6 +47,18 @@ struct ExpectState {
     uint64_t excludeMask;  // EXPECT_ANY_EXCEPT only: bit i set => input i is excluded
 };
 
+// Qualification state for one EXPECT_ANY touch candidate (brush-by filter).
+// A candidate is opened on a press edge and must survive a confirmation
+// window (persistence + delta consistency + sweep plausibility) before the
+// touch is reported through the EXPECT_ANY queue. See Config.h section 6b.
+struct AnyCandidate {
+    bool active;
+    uint32_t startTime;         // Window start (millis)
+    uint16_t deltaSamples;      // Successful delta-register reads this window
+    uint16_t goodDeltaSamples;  // Samples with delta >= EXPECT_ANY_DELTA_MIN
+    uint8_t untouchedStreak;    // Consecutive raw-untouched poll samples
+};
+
 // ============================================================================
 // TouchController Class
 // ============================================================================
@@ -120,6 +132,10 @@ private:
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
     bool m_expectAnyUsed[INPUT_COUNT];  // Inputs already reported by EXPECT_ANY
+    AnyCandidate m_anyCandidates[INPUT_COUNT];        // EXPECT_ANY qualification state
+    uint32_t m_pressEdgeRing[EXPECT_ANY_EDGE_RING_SIZE];  // Recent press-edge timestamps
+    uint8_t m_pressEdgeRingPos;
+    uint32_t m_sweepHoldoffUntil;      // EXPECT_ANY decisions deferred until this time
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
     bool m_handsOffDetectionEnabled;    // HANDSOFF_DETECTION_ON/OFF
@@ -130,6 +146,10 @@ private:
     bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
     void pollSensors();
     void processDebounce();
+    void processExpectAnyQualification();  // Advance/finish EXPECT_ANY candidates
+    void startAnyCandidate(uint8_t inputIndex, uint32_t now);
+    void recordPressEdge(uint32_t now);    // Sweep detection bookkeeping
+    void fireExpectAny(uint8_t inputIndex);  // Consume queue head & emit TOUCHED
     void processHandsOffDetection();
     bool anyInputTouched() const;
 };

@@ -22,6 +22,8 @@ TouchController::TouchController()
     : m_eventQueue(nullptr)
     , m_expectAnyHead(0)
     , m_expectAnyTail(0)
+    , m_pressEdgeRingPos(0)
+    , m_sweepHoldoffUntil(0)
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
     , m_handsOffDetectionEnabled(false)
@@ -52,6 +54,8 @@ TouchController::TouchController()
         m_expectAnyQueue[i].excludeMask = 0;
     }
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
+    memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
+    memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
 }
 
 // ============================================================================
@@ -102,6 +106,10 @@ bool TouchController::begin() {
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
     }
+    memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
+    memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
+    m_pressEdgeRingPos = 0;
+    m_sweepHoldoffUntil = 0;
 
     return m_activeSensorCount > 0;
 }
@@ -116,6 +124,7 @@ void TouchController::tick() {
 
     pollSensors();
     processDebounce();
+    processExpectAnyQualification();
     processHandsOffDetection();
 }
 
@@ -206,6 +215,8 @@ void TouchController::clearExpectAny() {
     m_expectAnyHead = 0;
     m_expectAnyTail = 0;
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
+    // Drop any in-flight qualification candidates as well.
+    memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
 }
 
 void TouchController::clearAllExpectations() {
@@ -531,22 +542,18 @@ void TouchController::processDebounce() {
         CommandController::indexToPosition(i, posStr);
 
         if (input.debouncedTouched) {
-            // Check expect-any queue (skip inputs already reported, and inputs
-            // excluded by an EXPECT_ANY_EXCEPT at the head of the queue).
+            recordPressEdge(now);
+
+            // EXPECT_ANY: do NOT report immediately. Open a qualification
+            // window that rejects brush-by contacts; the touch is reported
+            // by processExpectAnyQualification() once it proves to be a
+            // sustained grab. (EXPECT <pos> below stays instant - with a
+            // single armed hold a false positive is impossible.)
             if (m_expectAnyTail != m_expectAnyHead &&
                 m_expectAnyQueue[m_expectAnyTail].active &&
-                !m_expectAnyUsed[i] &&
-                !((m_expectAnyQueue[m_expectAnyTail].excludeMask >> i) & (uint64_t)1))
+                !m_expectAnyUsed[i])
             {
-                m_eventQueue->queueTouched(posStr, m_expectAnyQueue[m_expectAnyTail].commandId);
-                m_expectAnyQueue[m_expectAnyTail].active = false;
-                m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
-                m_expectAnyUsed[i] = true;
-
-                // Reset used mask when queue is empty
-                if (m_expectAnyTail == m_expectAnyHead) {
-                    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
-                }
+                startAnyCandidate(i, now);
             }
             if (m_expectDown[i].active) {
                 m_eventQueue->queueTouched(posStr, m_expectDown[i].commandId);
@@ -554,6 +561,8 @@ void TouchController::processDebounce() {
                 m_expectDown[i].commandId = COMMAND_ID_NONE;
             }
         } else {
+            // Debounced release: any pending candidate is stale by now.
+            m_anyCandidates[i].active = false;
             if (m_expectUp[i].active) {
                 m_eventQueue->queueTouchReleased(posStr, m_expectUp[i].commandId);
                 m_expectUp[i].active = false;
@@ -568,6 +577,118 @@ bool TouchController::anyInputTouched() const {
         if (m_inputs[i].debouncedTouched) return true;
     }
     return false;
+}
+
+// ============================================================================
+// EXPECT_ANY qualification (brush-by rejection - see Config.h section 6b)
+// ============================================================================
+
+void TouchController::startAnyCandidate(uint8_t inputIndex, uint32_t now) {
+    AnyCandidate& c = m_anyCandidates[inputIndex];
+    c.active = true;
+    c.startTime = now;
+    c.deltaSamples = 0;
+    c.goodDeltaSamples = 0;
+    c.untouchedStreak = 0;
+}
+
+void TouchController::recordPressEdge(uint32_t now) {
+    m_pressEdgeRing[m_pressEdgeRingPos] = now;
+    m_pressEdgeRingPos = (uint8_t)((m_pressEdgeRingPos + 1) % EXPECT_ANY_EDGE_RING_SIZE);
+
+    // Count press edges inside the sweep window. 3+ new contacts in half a
+    // second cannot be intentional grabs (max 2 hands) - treat as an arm
+    // sweeping across the wall and defer all EXPECT_ANY decisions.
+    uint8_t recent = 0;
+    for (uint8_t k = 0; k < EXPECT_ANY_EDGE_RING_SIZE; k++) {
+        if (m_pressEdgeRing[k] != 0 &&
+            now - m_pressEdgeRing[k] <= EXPECT_ANY_SWEEP_WINDOW_MS) {
+            recent++;
+        }
+    }
+    if (recent >= EXPECT_ANY_SWEEP_TOUCH_COUNT) {
+        m_sweepHoldoffUntil = now + EXPECT_ANY_SWEEP_HOLDOFF_MS;
+    }
+}
+
+void TouchController::fireExpectAny(uint8_t inputIndex) {
+    if (!m_eventQueue) return;
+    if (m_expectAnyTail == m_expectAnyHead) return;  // queue empty
+
+    ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
+    if (!head.active || m_expectAnyUsed[inputIndex]) return;
+    if ((head.excludeMask >> inputIndex) & (uint64_t)1) return;  // EXPECT_ANY_EXCEPT
+
+    char posStr[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(inputIndex, posStr);
+    m_eventQueue->queueTouched(posStr, head.commandId);
+
+    head.active = false;
+    head.commandId = COMMAND_ID_NONE;
+    m_expectAnyTail = (uint8_t)((m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE);
+    m_expectAnyUsed[inputIndex] = true;
+
+    // Reset used mask when queue is empty
+    if (m_expectAnyTail == m_expectAnyHead) {
+        memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
+    }
+}
+
+void TouchController::processExpectAnyQualification() {
+    uint32_t now = millis();
+
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        AnyCandidate& c = m_anyCandidates[i];
+        if (!c.active) continue;
+
+        // Queue drained or input already reported meanwhile: candidate is moot.
+        if (m_expectAnyTail == m_expectAnyHead || m_expectAnyUsed[i]) {
+            c.active = false;
+            continue;
+        }
+
+        // ---- 1. Persistence: raw contact must not drop out ----
+        if (m_inputs[i].currentTouched) {
+            c.untouchedStreak = 0;
+        } else if (++c.untouchedStreak >= EXPECT_ANY_DROPOUT_SAMPLES) {
+            // Contact vanished: classic brush-by. A real grab produces a new
+            // press edge later and re-qualifies from scratch.
+            c.active = false;
+            continue;
+        }
+
+        // ---- 2. Delta consistency: sample grab strength ----
+        int8_t delta;
+        if (readSensorValue(i, delta)) {
+            c.deltaSamples++;
+            if (delta >= EXPECT_ANY_DELTA_MIN) c.goodDeltaSamples++;
+        }
+
+        // ---- 3. Decide at the end of the confirmation window ----
+        if (now - c.startTime < EXPECT_ANY_CONFIRM_MS) continue;
+        if (now < m_sweepHoldoffUntil) continue;  // arm sweep: defer decision
+
+        // Delta check degrades gracefully: if no delta reads succeeded
+        // (I2C hiccups) persistence alone decides.
+        bool deltaOk = (c.deltaSamples == 0) ||
+                       ((uint32_t)c.goodDeltaSamples * 100 >=
+                        (uint32_t)c.deltaSamples * EXPECT_ANY_DELTA_GOOD_PCT);
+
+        if (deltaOk && m_inputs[i].currentTouched) {
+            fireExpectAny(i);
+            c.active = false;
+        } else if (m_inputs[i].currentTouched) {
+            // Still in contact but delta was not consistently grab-like yet
+            // (e.g. hand still settling onto the hold). Restart the window
+            // instead of rejecting - a sustained grab passes eventually.
+            c.startTime = now;
+            c.deltaSamples = 0;
+            c.goodDeltaSamples = 0;
+            c.untouchedStreak = 0;
+        } else {
+            c.active = false;
+        }
+    }
 }
 
 void TouchController::processHandsOffDetection() {
