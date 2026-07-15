@@ -480,8 +480,11 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::EXPECT:
             if (m_touchController) {
-                m_touchController->setExpectDown(cmd.positionIndex, cmdId);
+                // ACK must be queued BEFORE arming: if the input is already
+                // held, setExpectDown() emits TOUCHED immediately and the Pi
+                // expects ACK -> TOUCHED ordering.
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+                m_touchController->setExpectDown(cmd.positionIndex, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
@@ -507,8 +510,9 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::EXPECT_RELEASE:
             if (m_touchController) {
-                m_touchController->setExpectUp(cmd.positionIndex, cmdId);
+                // Same ordering requirement as EXPECT (see above).
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+                m_touchController->setExpectUp(cmd.positionIndex, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
