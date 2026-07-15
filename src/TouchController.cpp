@@ -361,6 +361,12 @@ bool TouchController::initSensor(uint8_t sensorIndex) {
     // Speed up cycle time
     if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) return false;
 
+    // Apply default sensitivity (bits 6:4 of SENSITIVITY_CONTROL, global per chip)
+    uint8_t sens;
+    if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
+    sens = (uint8_t)((sens & 0x8F) | (CAP1188_DEFAULT_SENSITIVITY << 4));
+    if (!writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
+
     // Enable exactly the channels referenced by INPUT_MAPPINGS for this sensor.
     uint8_t mask = m_sensors[sensorIndex].enableMask;
     if (mask == 0) {
