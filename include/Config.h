@@ -193,6 +193,14 @@ constexpr uint16_t EXPECT_ANY_SWEEP_HOLDOFF_MS = 400;
 // Size of the press-edge timestamp ring used for sweep detection.
 constexpr uint8_t EXPECT_ANY_EDGE_RING_SIZE = 8;
 
+// How long a hold that is ALREADY touched still satisfies a newly armed
+// EXPECT <pos> immediately. Covers the race where a player grabs the hold a
+// moment before the Pi's EXPECT arrives (sequence play). Holds touched
+// longer ago are considered STALE - e.g. the previous player still hanging
+// on their recorded holds when the next player's turn starts - and require
+// a fresh press edge (release + re-grab) to count.
+constexpr uint16_t EXPECT_HELD_FRESH_MS = 2000;
+
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
 
@@ -314,7 +322,7 @@ constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
 // Sensitivity level written to every chip at init (bits 6:4 of reg 0x1F).
 // 0 = most sensitive (128x) ... 7 = least sensitive (1x). Chip default is 2.
 // Can still be changed at runtime per chip via SET_SENSITIVITY.
-constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 4;
+constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 3;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 

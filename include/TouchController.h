@@ -39,6 +39,7 @@ struct TouchInputState {
     bool debouncedTouched;
     bool lastReportedTouched;
     uint32_t lastChangeTime;
+    uint32_t pressStartTime;   // millis() of the last debounced press edge
 };
 
 struct ExpectState {

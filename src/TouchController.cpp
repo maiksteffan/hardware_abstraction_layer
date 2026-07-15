@@ -105,6 +105,7 @@ bool TouchController::begin() {
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
+        m_inputs[i].pressStartTime = 0;
     }
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
     memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
@@ -169,8 +170,13 @@ void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= INPUT_COUNT) return;
 
     // If the input is ALREADY held when the EXPECT arrives, there will never
-    // be a press edge - report TOUCHED immediately instead of arming.
-    if (m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
+    // be a press edge. Report TOUCHED immediately - but only if the grab is
+    // FRESH (within EXPECT_HELD_FRESH_MS). This covers a player grabbing the
+    // hold a moment before the Pi's EXPECT arrives, while stale holds (e.g.
+    // the previous player still hanging on their recorded holds during a
+    // turn switch) must be released and re-grabbed to count.
+    if (m_inputs[inputIndex].debouncedTouched && m_eventQueue &&
+        (millis() - m_inputs[inputIndex].pressStartTime) <= EXPECT_HELD_FRESH_MS) {
         char posStr[POSITION_STRING_LENGTH];
         CommandController::indexToPosition(inputIndex, posStr);
         m_eventQueue->queueTouched(posStr, commandId);
@@ -568,6 +574,7 @@ void TouchController::processDebounce() {
         CommandController::indexToPosition(i, posStr);
 
         if (input.debouncedTouched) {
+            input.pressStartTime = now;
             recordPressEdge(now);
 
             // EXPECT_ANY: do NOT report immediately. Open a qualification
