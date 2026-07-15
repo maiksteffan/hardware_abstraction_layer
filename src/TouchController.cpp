@@ -167,12 +167,32 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
 
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= INPUT_COUNT) return;
+
+    // If the input is ALREADY held when the EXPECT arrives, there will never
+    // be a press edge - report TOUCHED immediately instead of arming.
+    if (m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
+        char posStr[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(inputIndex, posStr);
+        m_eventQueue->queueTouched(posStr, commandId);
+        return;
+    }
+
     m_expectDown[inputIndex].active = true;
     m_expectDown[inputIndex].commandId = commandId;
 }
 
 void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= INPUT_COUNT) return;
+
+    // Symmetric to setExpectDown: if the input is already released, there
+    // will never be a release edge - report TOUCH_RELEASED immediately.
+    if (!m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
+        char posStr[POSITION_STRING_LENGTH];
+        CommandController::indexToPosition(inputIndex, posStr);
+        m_eventQueue->queueTouchReleased(posStr, commandId);
+        return;
+    }
+
     m_expectUp[inputIndex].active = true;
     m_expectUp[inputIndex].commandId = commandId;
 }
