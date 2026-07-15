@@ -212,6 +212,11 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 // Strip configuration
 constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
 
+// Number of physical LEDs lit per logical position (must be ODD: a center
+// LED plus an equal number of neighbors on each side). SHOW/SUCCESS/BLINK/...
+// light this whole block; expansion animations grow outward from its edges.
+constexpr uint8_t LED_POSITION_WIDTH = 3;
+
 #ifndef LED_STRIP_1_LENGTH
 #define LED_STRIP_1_LENGTH 260
 #endif

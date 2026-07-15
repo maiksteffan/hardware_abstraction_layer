@@ -489,11 +489,23 @@ const LedMirror* LedController::getMirror(uint8_t position) const {
 void LedController::paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b) {
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
-    setLed(mapping->strip, (int16_t)mapping->index + offset, r, g, b);
 
+    // Each logical position covers a core of LED_POSITION_WIDTH physical LEDs
+    // centered on the mapped index. Offset 0 paints the whole core; nonzero
+    // offsets (expansion rings) are shifted outward past the core edge so
+    // they never overlap it.
+    constexpr int16_t half = (LED_POSITION_WIDTH - 1) / 2;
     const LedMirror* mirror = getMirror(position);
-    if (mirror) {
-        setLed(mirror->strip, (int16_t)mirror->index + offset, r, g, b);
+
+    if (offset == 0) {
+        for (int16_t o = -half; o <= half; o++) {
+            setLed(mapping->strip, (int16_t)mapping->index + o, r, g, b);
+            if (mirror) setLed(mirror->strip, (int16_t)mirror->index + o, r, g, b);
+        }
+    } else {
+        int16_t shifted = (offset > 0) ? offset + half : offset - half;
+        setLed(mapping->strip, (int16_t)mapping->index + shifted, r, g, b);
+        if (mirror) setLed(mirror->strip, (int16_t)mirror->index + shifted, r, g, b);
     }
 }
 
