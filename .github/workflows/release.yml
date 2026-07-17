@@ -1,0 +1,55 @@
+name: Build & Release Firmware
+
+# Build the ESP32-S3 firmware and publish a merged, 0x0-flashable binary
+# whenever a semantic-version tag is pushed. The Raspberry Pi downloads the
+# `firmware-merged.bin` asset and flashes it over USB with esptool.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - '[0-9]*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  PIO_ENV: esp32-s3-devkitc-1
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO and esptool
+        run: pip install platformio "esptool<5"
+
+      - name: Verify FIRMWARE_VERSION matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FW="$(grep -oP '#define\s+FIRMWARE_VERSION\s+"\K[^"]+' include/Config.h)"
+          echo "Tag version:      $TAG"
+          echo "Firmware version: $FW"
+          if [ "$TAG" != "$FW" ]; then
+            echo "::error::FIRMWARE_VERSION ($FW) in include/Config.h does not match tag ($TAG)."
+            exit 1
+          fi
+
+      - name: Build firmware
+        run: pio run -e "$PIO_ENV"
+
+      - name: Merge into a single flashable binary
+        run: python .github/scripts/merge_firmware.py ".pio/build/$PIO_ENV" firmware-merged.bin esp32s3
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: firmware-merged.bin
+          generate_release_notes: true
