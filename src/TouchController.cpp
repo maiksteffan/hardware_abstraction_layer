@@ -674,8 +674,8 @@ void TouchController::processExpectAnyQualification() {
         AnyCandidate& c = m_anyCandidates[i];
         if (!c.active) continue;
 
-        // Queue drained or input already reported meanwhile: candidate is moot.
-        if (m_expectAnyTail == m_expectAnyHead || m_expectAnyUsed[i]) {
+        // Input already reported for the current EXPECT_ANY batch.
+        if (m_expectAnyTail != m_expectAnyHead && m_expectAnyUsed[i]) {
             c.active = false;
             continue;
         }
@@ -700,6 +700,19 @@ void TouchController::processExpectAnyQualification() {
         // ---- 3. Decide at the end of the confirmation window ----
         if (now - c.startTime < EXPECT_ANY_CONFIRM_MS) continue;
         if (now < m_sweepHoldoffUntil) continue;  // arm sweep: defer decision
+
+        // Queue empty right now (e.g. two simultaneous grabs but the Pi
+        // queues EXPECT_ANY one at a time, so the second command only
+        // arrives after the first TOUCHED). Keep the qualified candidate
+        // PENDING while the grab is still fresh - it fires on the tick
+        // after the next EXPECT_ANY is queued. Without this the second
+        // simultaneous touch would never be reported (no new press edge).
+        if (m_expectAnyTail == m_expectAnyHead) {
+            if (now - m_inputs[i].pressStartTime > EXPECT_HELD_FRESH_MS) {
+                c.active = false;  // stale - require a fresh re-grab
+            }
+            continue;
+        }
 
         // Delta check degrades gracefully: if no delta reads succeeded
         // (I2C hiccups) persistence alone decides.
