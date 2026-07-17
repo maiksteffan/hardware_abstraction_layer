@@ -40,6 +40,8 @@ TouchController::TouchController()
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
+        m_inputs[i].pressStartTime = 0;
+        m_inputs[i].pressConsumed = false;
 
         m_expectDown[i].active = false;
         m_expectDown[i].commandId = COMMAND_ID_NONE;
@@ -106,6 +108,7 @@ bool TouchController::begin() {
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
         m_inputs[i].pressStartTime = 0;
+        m_inputs[i].pressConsumed = false;
     }
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
     memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
@@ -171,12 +174,18 @@ void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
 
     // If the input is ALREADY held when the EXPECT arrives, there will never
     // be a press edge. Report TOUCHED immediately - but only if the grab is
-    // FRESH (within EXPECT_HELD_FRESH_MS). This covers a player grabbing the
-    // hold a moment before the Pi's EXPECT arrives, while stale holds (e.g.
-    // the previous player still hanging on their recorded holds during a
-    // turn switch) must be released and re-grabbed to count.
+    // FRESH (within EXPECT_HELD_FRESH_MS) AND this press has not already
+    // satisfied a previous EXPECT/EXPECT_ANY. Each press edge may only be
+    // consumed ONCE: without this, a sequence alternating between two holds
+    // that stay held ping-pongs instantly (the same uninterrupted grab
+    // "answers" every re-armed EXPECT), falsely advancing the sequence.
+    // This still covers the legit race of a player grabbing the hold a
+    // moment before the Pi's EXPECT arrives, while stale or already-counted
+    // holds must be released and re-grabbed to count.
     if (m_inputs[inputIndex].debouncedTouched && m_eventQueue &&
+        !m_inputs[inputIndex].pressConsumed &&
         (millis() - m_inputs[inputIndex].pressStartTime) <= EXPECT_HELD_FRESH_MS) {
+        m_inputs[inputIndex].pressConsumed = true;
         char posStr[POSITION_STRING_LENGTH];
         CommandController::indexToPosition(inputIndex, posStr);
         m_eventQueue->queueTouched(posStr, commandId);
@@ -575,6 +584,7 @@ void TouchController::processDebounce() {
 
         if (input.debouncedTouched) {
             input.pressStartTime = now;
+            input.pressConsumed = false;  // fresh press edge: may satisfy one EXPECT
             recordPressEdge(now);
 
             // EXPECT_ANY: do NOT report immediately. Open a qualification
@@ -589,6 +599,7 @@ void TouchController::processDebounce() {
                 startAnyCandidate(i, now);
             }
             if (m_expectDown[i].active) {
+                input.pressConsumed = true;
                 m_eventQueue->queueTouched(posStr, m_expectDown[i].commandId);
                 m_expectDown[i].active = false;
                 m_expectDown[i].commandId = COMMAND_ID_NONE;
@@ -654,6 +665,7 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
 
     char posStr[POSITION_STRING_LENGTH];
     CommandController::indexToPosition(inputIndex, posStr);
+    m_inputs[inputIndex].pressConsumed = true;
     m_eventQueue->queueTouched(posStr, head.commandId);
 
     head.active = false;

@@ -27,7 +27,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.0.3"
+#define FIRMWARE_VERSION "1.0.4"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -258,9 +258,9 @@ constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
 // ============================================================================
 
 // State: SHOW (default active state)
-constexpr uint8_t COLOR_SHOW_R = 0;
+constexpr uint8_t COLOR_SHOW_R = 128;
 constexpr uint8_t COLOR_SHOW_G = 0;
-constexpr uint8_t COLOR_SHOW_B = 255;    // Blue
+constexpr uint8_t COLOR_SHOW_B = 255;    // Purple
 
 // State: SUCCESS (correct action)
 constexpr uint8_t COLOR_SUCCESS_R = 0;

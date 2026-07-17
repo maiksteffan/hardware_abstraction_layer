@@ -40,6 +40,8 @@ struct TouchInputState {
     bool lastReportedTouched;
     uint32_t lastChangeTime;
     uint32_t pressStartTime;   // millis() of the last debounced press edge
+    bool pressConsumed;        // Current press already satisfied an EXPECT/EXPECT_ANY;
+                               // requires release + re-grab before it can satisfy another
 };
 
 struct ExpectState {
