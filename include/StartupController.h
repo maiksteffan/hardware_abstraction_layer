@@ -34,7 +34,7 @@ public:
      * 1. Initializes LEDs and plays a visual-confirmation sweep
      * 2. Initializes touch sensors with retries, builds status message
      * 3. Enters handshake loop broadcasting status every 3s until ACK received
-     * 4. Sends "HARDWARE INITIALISED" and returns
+     * 4. Sends firmware INFO followed by "HARDWARE INITIALISED" and returns
      */
     void run();
 

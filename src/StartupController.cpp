@@ -47,7 +47,16 @@ void StartupController::run() {
     // Step 3 — Handshake loop (blocks until ACK received)
     handshakeLoop();
 
-    // Signal completion
+    // Announce metadata on every boot. New Pi software also queries INFO after
+    // connecting so older installed firmware remains compatible.
+    m_serial.print("INFO firmware=");
+    m_serial.print(FIRMWARE_VERSION);
+    m_serial.print(" protocol=");
+    m_serial.print(PROTOCOL_VERSION);
+    m_serial.print(" board=");
+    m_serial.println(BOARD_TYPE);
+
+    // Signal completion after all startup metadata has been emitted.
     m_serial.println("HARDWARE INITIALISED");
 }
 
