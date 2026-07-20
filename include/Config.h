@@ -258,9 +258,9 @@ constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
 // ============================================================================
 
 // State: SHOW (default active state)
-constexpr uint8_t COLOR_SHOW_R = 80;
+constexpr uint8_t COLOR_SHOW_R = 0;
 constexpr uint8_t COLOR_SHOW_G = 0;
-constexpr uint8_t COLOR_SHOW_B = 205;    // dark Purple
+constexpr uint8_t COLOR_SHOW_B = 255;    // dark Purple
 
 // State: SUCCESS (correct action)
 constexpr uint8_t COLOR_SUCCESS_R = 0;
