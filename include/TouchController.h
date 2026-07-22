@@ -18,8 +18,10 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "Config.h"
+#include "TouchIntentClassifier.h"
 
 class EventQueue;
+class TouchTelemetry;
 
 // ============================================================================
 // Types
@@ -71,6 +73,8 @@ public:
     TouchController();
     
     void setEventQueue(EventQueue* eventQueue);
+    // Optional runtime telemetry sink (also wired into the intent classifier).
+    void setTelemetry(TouchTelemetry* telemetry);
     bool begin();
     void tick();
     
@@ -127,6 +131,8 @@ public:
 
 private:
     EventQueue* m_eventQueue;
+    TouchTelemetry* m_telemetry;              // may stay nullptr (telemetry disabled)
+    TouchIntentClassifier m_classifier;       // intent classification (see Config.h 6c)
     PhysicalSensor m_sensors[TOUCH_SENSOR_COUNT];
     TouchInputState m_inputs[INPUT_COUNT];
     ExpectState m_expectDown[INPUT_COUNT];
@@ -152,9 +158,13 @@ private:
     void processExpectAnyQualification();  // Advance/finish EXPECT_ANY candidates
     void startAnyCandidate(uint8_t inputIndex, uint32_t now);
     void recordPressEdge(uint32_t now);    // Sweep detection bookkeeping
-    void fireExpectAny(uint8_t inputIndex);  // Consume queue head & emit TOUCHED
+    bool fireExpectAny(uint8_t inputIndex);  // Consume queue head & emit TOUCHED; true if emitted
     void processHandsOffDetection();
     bool anyInputTouched() const;
+    bool anyExpectDownActive() const;
+    // Classifier hooks (no-ops while both filter modes are Disabled)
+    void classifierOnPressEdge(uint8_t inputIndex, uint32_t now);
+    void feedClassifierFallbackSamples(uint32_t now);
 };
 
 #endif // TOUCH_CONTROLLER

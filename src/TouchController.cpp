@@ -13,6 +13,13 @@
 #include "TouchController.h"
 #include "CommandController.h"   // for indexToPosition()
 #include "EventQueue.h"
+#include "TouchTelemetry.h"
+
+// True when the intent classifier participates in any context (constexpr
+// modes -> the compiler folds these checks away when both are Disabled).
+static constexpr bool CLASSIFIER_ENABLED =
+    (OPEN_SELECTION_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED) ||
+    (TARGETED_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED);
 
 // ============================================================================
 // Constructor
@@ -20,6 +27,7 @@
 
 TouchController::TouchController()
     : m_eventQueue(nullptr)
+    , m_telemetry(nullptr)
     , m_expectAnyHead(0)
     , m_expectAnyTail(0)
     , m_pressEdgeRingPos(0)
@@ -66,6 +74,11 @@ TouchController::TouchController()
 
 void TouchController::setEventQueue(EventQueue* eventQueue) {
     m_eventQueue = eventQueue;
+}
+
+void TouchController::setTelemetry(TouchTelemetry* telemetry) {
+    m_telemetry = telemetry;
+    m_classifier.setTelemetrySink(telemetry);
 }
 
 bool TouchController::begin() {
@@ -124,12 +137,32 @@ void TouchController::tick() {
     if (now - m_lastPollTime < TOUCH_POLL_INTERVAL_MS) {
         return;
     }
+    // Health accounting: a gap of 2+ intervals means at least one poll cycle
+    // was missed (task starvation / long I2C stall).
+    if (m_telemetry) {
+        m_telemetry->bump(TelemetryCounter::POLL_CYCLES);
+        if (m_lastPollTime != 0 &&
+            now - m_lastPollTime >= 2 * TOUCH_POLL_INTERVAL_MS) {
+            m_telemetry->bump(TelemetryCounter::MISSED_POLLS);
+        }
+    }
     m_lastPollTime = now;
+
+    // Tick-duration high-water mark, only measured while telemetry is on.
+    uint32_t tickStartUs = 0;
+    bool measure = m_telemetry && m_telemetry->enabledFor(1);
+    if (measure) tickStartUs = micros();
 
     pollSensors();
     processDebounce();
     processExpectAnyQualification();
+    if (CLASSIFIER_ENABLED) {
+        feedClassifierFallbackSamples(now);
+        m_classifier.evaluate(now);
+    }
     processHandsOffDetection();
+
+    if (measure) m_telemetry->noteTickDuration(micros() - tickStartUs);
 }
 
 bool TouchController::recalibrate(uint8_t inputIndex) {
@@ -262,6 +295,11 @@ void TouchController::clearAllExpectations() {
         m_expectUp[i].commandId = COMMAND_ID_NONE;
     }
     clearExpectAny();
+    // CLEAN_QUEUE marks a turn boundary on the Pi: any in-flight interaction
+    // episode is over and must never influence the next expectation.
+    if (CLASSIFIER_ENABLED) {
+        m_classifier.reset(millis(), EpisodeEndReason::CLEANED);
+    }
 }
 
 void TouchController::setHandsOffDetection(bool enabled, uint32_t commandId) {
@@ -520,6 +558,8 @@ void TouchController::pollSensors() {
                          CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
             m_sensors[s].lastStatus = status;
             m_sensors[s].statusValid = true;
+        } else if (m_telemetry) {
+            m_telemetry->bump(TelemetryCounter::I2C_STATUS_FAIL);
         }
     }
 
@@ -586,6 +626,15 @@ void TouchController::processDebounce() {
             input.pressStartTime = now;
             input.pressConsumed = false;  // fresh press edge: may satisfy one EXPECT
             recordPressEdge(now);
+            if (CLASSIFIER_ENABLED) {
+                classifierOnPressEdge(i, now);
+            } else if (m_telemetry && !m_expectDown[i].active &&
+                       !anyExpectDownActive() &&
+                       m_expectAnyTail == m_expectAnyHead) {
+                // Even with the classifier off, count contacts that no
+                // expectation is listening for (pure diagnostics).
+                m_telemetry->bump(TelemetryCounter::NO_EXPECT_CONTACT);
+            }
 
             // EXPECT_ANY: do NOT report immediately. Open a qualification
             // window that rejects brush-by contacts; the touch is reported
@@ -607,6 +656,9 @@ void TouchController::processDebounce() {
         } else {
             // Debounced release: any pending candidate is stale by now.
             m_anyCandidates[i].active = false;
+            if (CLASSIFIER_ENABLED) {
+                m_classifier.onReleaseEdge(i, now);
+            }
             if (m_expectUp[i].active) {
                 m_eventQueue->queueTouchReleased(posStr, m_expectUp[i].commandId);
                 m_expectUp[i].active = false;
@@ -621,6 +673,70 @@ bool TouchController::anyInputTouched() const {
         if (m_inputs[i].debouncedTouched) return true;
     }
     return false;
+}
+
+bool TouchController::anyExpectDownActive() const {
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        if (m_expectDown[i].active) return true;
+    }
+    return false;
+}
+
+// ============================================================================
+// Intent classifier hooks (see TouchIntentClassifier.h and Config.h 6c)
+// ============================================================================
+
+// Derives the expectation context for a fresh press edge and feeds it to the
+// classifier. The context is inferred ONLY from currently armed expectations
+// (the firmware holds no game state).
+void TouchController::classifierOnPressEdge(uint8_t inputIndex, uint32_t now) {
+    EpisodeContext ctx = EpisodeContext::NONE;
+    uint32_t ctxCommandId = COMMAND_ID_NONE;
+    bool excluded = false;
+    bool track = false;
+
+    if (m_expectDown[inputIndex].active) {
+        // Press on the armed target hold. EXPECT stays instant and
+        // unfiltered; targeted tracking is diagnostics-only.
+        ctx = EpisodeContext::TARGET;
+        ctxCommandId = m_expectDown[inputIndex].commandId;
+        track = (TARGETED_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED);
+    } else if (anyExpectDownActive()) {
+        // Contact on a NON-armed hold while a target window is open:
+        // interesting for the incidental-contact investigation.
+        if (m_telemetry) m_telemetry->bump(TelemetryCounter::NON_TARGET_CONTACT);
+        ctx = EpisodeContext::TARGET;
+        track = (TARGETED_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED);
+    } else if (m_expectAnyTail != m_expectAnyHead &&
+               m_expectAnyQueue[m_expectAnyTail].active) {
+        const ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
+        ctx = (head.excludeMask != 0) ? EpisodeContext::OPEN_EXCEPT
+                                      : EpisodeContext::OPEN_ANY;
+        ctxCommandId = head.commandId;
+        excluded = ((head.excludeMask >> inputIndex) & (uint64_t)1) != 0;
+        track = (OPEN_SELECTION_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED);
+    } else {
+        // Physical contact with no expectation listening at all.
+        if (m_telemetry) m_telemetry->bump(TelemetryCounter::NO_EXPECT_CONTACT);
+    }
+
+    if (track) {
+        m_classifier.onPressEdge(inputIndex, now, ctx, ctxCommandId, excluded);
+    }
+}
+
+// Tracked candidates without an active EXPECT_ANY qualification window
+// (deferred, target-context or dropout-cancelled ones) still need per-poll
+// contact samples so the classifier can observe persistence and release.
+// Delta reads are NOT added here — the I2C budget stays owned by the
+// qualification loop; the classifier degrades gracefully without deltas.
+void TouchController::feedClassifierFallbackSamples(uint32_t now) {
+    if (!m_classifier.hasActiveEpisode()) return;
+    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+        if (m_anyCandidates[i].active) continue;  // sampled by qualification loop
+        if (!m_classifier.isTracking(i)) continue;
+        m_classifier.onSample(i, m_inputs[i].currentTouched, false, 0, now);
+    }
 }
 
 // ============================================================================
@@ -652,16 +768,19 @@ void TouchController::recordPressEdge(uint32_t now) {
     }
     if (recent >= EXPECT_ANY_SWEEP_TOUCH_COUNT) {
         m_sweepHoldoffUntil = now + EXPECT_ANY_SWEEP_HOLDOFF_MS;
+        if (CLASSIFIER_ENABLED) {
+            m_classifier.noteSweepDetected(now);
+        }
     }
 }
 
-void TouchController::fireExpectAny(uint8_t inputIndex) {
-    if (!m_eventQueue) return;
-    if (m_expectAnyTail == m_expectAnyHead) return;  // queue empty
+bool TouchController::fireExpectAny(uint8_t inputIndex) {
+    if (!m_eventQueue) return false;
+    if (m_expectAnyTail == m_expectAnyHead) return false;  // queue empty
 
     ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
-    if (!head.active || m_expectAnyUsed[inputIndex]) return;
-    if ((head.excludeMask >> inputIndex) & (uint64_t)1) return;  // EXPECT_ANY_EXCEPT
+    if (!head.active || m_expectAnyUsed[inputIndex]) return false;
+    if ((head.excludeMask >> inputIndex) & (uint64_t)1) return false;  // EXPECT_ANY_EXCEPT
 
     char posStr[POSITION_STRING_LENGTH];
     CommandController::indexToPosition(inputIndex, posStr);
@@ -677,6 +796,7 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
     if (m_expectAnyTail == m_expectAnyHead) {
         memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
     }
+    return true;
 }
 
 void TouchController::processExpectAnyQualification() {
@@ -707,6 +827,14 @@ void TouchController::processExpectAnyQualification() {
         if (readSensorValue(i, delta)) {
             c.deltaSamples++;
             if (delta >= EXPECT_ANY_DELTA_MIN) c.goodDeltaSamples++;
+            if (CLASSIFIER_ENABLED) {
+                m_classifier.onSample(i, m_inputs[i].currentTouched, true, delta, now);
+            }
+        } else {
+            if (m_telemetry) m_telemetry->bump(TelemetryCounter::I2C_DELTA_FAIL);
+            if (CLASSIFIER_ENABLED) {
+                m_classifier.onSample(i, m_inputs[i].currentTouched, false, 0, now);
+            }
         }
 
         // ---- 3. Decide at the end of the confirmation window ----
@@ -733,7 +861,28 @@ void TouchController::processExpectAnyQualification() {
                         (uint32_t)c.deltaSamples * EXPECT_ANY_DELTA_GOOD_PCT);
 
         if (deltaOk && m_inputs[i].currentTouched) {
-            fireExpectAny(i);
+            // Intent classification. In SHADOW mode the decision is recorded
+            // for telemetry but never changes behavior. In ACTIVE mode the
+            // classifier may defer (bounded by INTENT_DEFER_MAX_MS) or, for
+            // high-confidence incidental contacts, suppress the emission.
+            if (OPEN_SELECTION_INTENT_FILTER_MODE != INTENT_FILTER_DISABLED) {
+                EmissionDecision decision = m_classifier.decideEmission(i, now);
+                if (OPEN_SELECTION_INTENT_FILTER_MODE == INTENT_FILTER_ACTIVE) {
+                    if (decision == EmissionDecision::SUPPRESS) {
+                        m_classifier.onSuppressed(i, now);
+                        c.active = false;
+                        continue;
+                    }
+                    if (decision == EmissionDecision::DEFER) {
+                        continue;  // candidate stays active; re-evaluated next tick
+                    }
+                }
+                if (fireExpectAny(i)) {
+                    m_classifier.onEmitted(i, now);
+                }
+            } else {
+                fireExpectAny(i);
+            }
             c.active = false;
         } else if (m_inputs[i].currentTouched) {
             // Still in contact but delta was not consistently grab-like yet

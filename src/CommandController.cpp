@@ -10,6 +10,7 @@
 #include "LedController.h"
 #include "TouchController.h"
 #include "EventQueue.h"
+#include "TouchTelemetry.h"
 
 // ============================================================================
 // Constructor
@@ -21,6 +22,7 @@ CommandController::CommandController(LedController& ledController,
     : m_ledController(ledController)
     , m_touchController(touchController)
     , m_eventQueue(eventQueue)
+    , m_telemetry(nullptr)
     , m_rxHead(0)
     , m_rxTail(0)
     , m_lastRxTime(0)
@@ -49,6 +51,10 @@ void CommandController::begin() {
     for (uint8_t i = 0; i < QUEUE_SIZE_COMMANDS; i++) {
         m_commandQueue[i].active = false;
     }
+}
+
+void CommandController::setTelemetry(TouchTelemetry* telemetry) {
+    m_telemetry = telemetry;
 }
 
 void CommandController::pollSerial() {
@@ -276,6 +282,25 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         p = skipWhitespace(p);
     }
     
+    // LOG_LEVEL <0..TOUCH_LOG_MAX_LEVEL>
+    if (cmd.action == CommandAction::LOG_LEVEL) {
+        if (*p < '0' || *p > '9') {
+            m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
+            return false;
+        }
+        uint8_t val = 0;
+        while (*p >= '0' && *p <= '9') {
+            val = val * 10 + (*p - '0');
+            p++;
+        }
+        if (val > TOUCH_LOG_MAX_LEVEL) {
+            m_eventQueue.queueError("invalid_level", COMMAND_ID_NONE);
+            return false;
+        }
+        cmd.extraValue = val;
+        p = skipWhitespace(p);
+    }
+    
     // Parse optional command ID (#number)
     if (*p == '#') {
         p++;
@@ -320,6 +345,12 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "CLEAN_QUEUE", len)) return CommandAction::CLEAN_QUEUE;
     if (strcasecmpN(str, "HANDSOFF_DETECTION_ON", len)) return CommandAction::HANDSOFF_DETECTION_ON;
     if (strcasecmpN(str, "HANDSOFF_DETECTION_OFF", len)) return CommandAction::HANDSOFF_DETECTION_OFF;
+    if (strcasecmpN(str, "LOG_ON", len)) return CommandAction::LOG_ON;
+    if (strcasecmpN(str, "LOG_OFF", len)) return CommandAction::LOG_OFF;
+    if (strcasecmpN(str, "LOG_LEVEL", len)) return CommandAction::LOG_LEVEL;
+    if (strcasecmpN(str, "LOG_STATUS", len)) return CommandAction::LOG_STATUS;
+    if (strcasecmpN(str, "LOG_CLEAR", len)) return CommandAction::LOG_CLEAR;
+    if (strcasecmpN(str, "LOG_DUMP", len)) return CommandAction::LOG_DUMP;
     return CommandAction::INVALID;
 }
 
@@ -353,6 +384,12 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::CLEAN_QUEUE: return "CLEAN_QUEUE";
         case CommandAction::HANDSOFF_DETECTION_ON: return "HANDSOFF_DETECTION_ON";
         case CommandAction::HANDSOFF_DETECTION_OFF: return "HANDSOFF_DETECTION_OFF";
+        case CommandAction::LOG_ON: return "LOG_ON";
+        case CommandAction::LOG_OFF: return "LOG_OFF";
+        case CommandAction::LOG_LEVEL: return "LOG_LEVEL";
+        case CommandAction::LOG_STATUS: return "LOG_STATUS";
+        case CommandAction::LOG_CLEAR: return "LOG_CLEAR";
+        case CommandAction::LOG_DUMP: return "LOG_DUMP";
         default: return "INVALID";
     }
 }
@@ -620,6 +657,60 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             // and starve the serial link.
             m_eventQueue.clear();
             m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
+        case CommandAction::LOG_ON:
+            if (m_telemetry) {
+                m_telemetry->setLevel(TOUCH_LOG_ON_LEVEL);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
+            break;
+            
+        case CommandAction::LOG_OFF:
+            if (m_telemetry) {
+                m_telemetry->setLevel(0);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
+            break;
+            
+        case CommandAction::LOG_LEVEL:
+            if (m_telemetry) {
+                m_telemetry->setLevel(cmd.extraValue);
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
+            break;
+            
+        case CommandAction::LOG_STATUS:
+            if (m_telemetry) {
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+                m_telemetry->queueStatus(m_eventQueue);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
+            break;
+            
+        case CommandAction::LOG_CLEAR:
+            if (m_telemetry) {
+                m_telemetry->clear();
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
+            break;
+            
+        case CommandAction::LOG_DUMP:
+            if (m_telemetry) {
+                m_telemetry->requestDump();
+                m_eventQueue.queueAck(actionStr, 0, cmdId);
+            } else {
+                m_eventQueue.queueError("no_telemetry", cmdId);
+            }
             break;
             
         default:

@@ -36,6 +36,14 @@
  *   PING [#id]                    - Health check
  *   INFO [#id]                    - Get firmware info
  *   SCAN [#id]                    - Scan for connected sensors
+ *
+ * Telemetry Commands (additive, DIAG output — Pi logs and ignores it):
+ *   LOG_ON [#id]                  - Enable touch telemetry (level 1)
+ *   LOG_OFF [#id]                 - Disable touch telemetry
+ *   LOG_LEVEL <0-3> [#id]         - Set telemetry verbosity (0=off, 1=episodes+decisions, 2=+candidates, 3=reserved)
+ *   LOG_STATUS [#id]              - Emit DIAG TOUCH_PERF counter summary
+ *   LOG_CLEAR [#id]               - Clear buffered records and counters
+ *   LOG_DUMP [#id]                - Flush buffered records even while disabled
  */
 
 #ifndef COMMAND_CONTROLLER_H
@@ -47,6 +55,7 @@
 class LedController;
 class TouchController;
 class EventQueue;
+class TouchTelemetry;
 
 // ============================================================================
 // Command Types
@@ -81,7 +90,13 @@ enum class CommandAction : uint8_t {
     PING,
     CLEAN_QUEUE,
     HANDSOFF_DETECTION_ON,
-    HANDSOFF_DETECTION_OFF
+    HANDSOFF_DETECTION_OFF,
+    LOG_ON,
+    LOG_OFF,
+    LOG_LEVEL,
+    LOG_STATUS,
+    LOG_CLEAR,
+    LOG_DUMP
 };
 
 // ============================================================================
@@ -128,11 +143,14 @@ public:
     void processCompletedLines();
     void tick();
     bool isQueueFull() const;
+    // Optional telemetry hookup for the LOG_* commands.
+    void setTelemetry(TouchTelemetry* telemetry);
 
 private:
     LedController& m_ledController;
     TouchController* m_touchController;
     EventQueue& m_eventQueue;
+    TouchTelemetry* m_telemetry;
     
     // Ring buffer for incoming serial data
     char m_rxBuffer[SERIAL_LINE_MAX_LENGTH * 2];

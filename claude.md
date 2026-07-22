@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.0.5` |
+| `FIRMWARE_VERSION` | `1.1.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H34 3-char position tokens) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -87,7 +87,13 @@ loop():                                        // Core 1
   commandController.tick()                     // advance async commands -> DONE
   ledController.tick()                         // step LED animations
   eventQueue.flush(EVENTS_PER_FLUSH)           // drain outgoing events to Serial
+  touchTelemetry.flush(eventQueue, millis())   // drain DIAG TOUCH_* telemetry (rate-limited)
 ```
+
+`TouchTelemetry` is a second (spinlock-protected) cross-core channel used
+ONLY for diagnostics: Core 0 writes fixed-size telemetry records/counters,
+Core 1 formats them into `DIAG TOUCH_*` lines. It never blocks and drops
+records when full (counted).
 
 ## 2.3 Modules
 
@@ -96,7 +102,11 @@ loop():                                        // Core 1
 | `CommandController` | [include/CommandController.h](include/CommandController.h), [src/CommandController.cpp](src/CommandController.cpp) | Parses serial lines, executes commands, 32-slot queue for async commands. Owns canonical `parsePosition()`/`indexToPosition()` |
 | `EventQueue` | [include/EventQueue.h](include/EventQueue.h), [src/EventQueue.cpp](src/EventQueue.cpp) | Thread-safe ring buffer for all outgoing messages; only writer to `Serial` after startup |
 | `LedController` | [include/LedController.h](include/LedController.h), [src/LedController.cpp](src/LedController.cpp) | Hold→LED mapping, solid colors, all animations (non-blocking, stepped from `tick()`) |
-| `TouchController` | [include/TouchController.h](include/TouchController.h), [src/TouchController.cpp](src/TouchController.cpp) | CAP1188 driver, debounce, expectation matching, EXPECT_ANY qualification, hands-off detection |
+| `TouchController` | [include/TouchController.h](include/TouchController.h), [src/TouchController.cpp](src/TouchController.cpp) | CAP1188 driver, debounce, expectation matching, EXPECT_ANY qualification, hands-off detection; feeds the intent classifier |
+| `TouchIntentClassifier` | [include/TouchIntentClassifier.h](include/TouchIntentClassifier.h), [src/TouchIntentClassifier.cpp](src/TouchIntentClassifier.cpp) | Arduino-free intent layer (§2.5b): groups presses into `InteractionEpisode`s, scores `TouchCandidate`s, classifies intentional / incidental / support / ambiguous / chord / sweep. Natively unit-tested |
+| `TouchTelemetry` | [include/TouchTelemetry.h](include/TouchTelemetry.h), [src/TouchTelemetry.cpp](src/TouchTelemetry.cpp) | Spinlock-protected telemetry ring + counters (`ITouchTelemetrySink` impl); formats `DIAG TOUCH_*` lines on Core 1, gated on EventQueue headroom |
+| `HoldGeometry` | [include/HoldGeometry.h](include/HoldGeometry.h), [src/HoldGeometry.cpp](src/HoldGeometry.cpp) | Physical (x, y) mm coordinates for all 34 holds; `squaredHoldDistance()` / `areHoldsAdjacent()` for spatial plausibility checks |
+| `TouchIntentTypes.h` | [include/TouchIntentTypes.h](include/TouchIntentTypes.h) | Shared Arduino-free types: episode/candidate structs, classification enums, telemetry record, `ITouchTelemetrySink` interface |
 | `StartupController` | [include/StartupController.h](include/StartupController.h), [src/StartupController.cpp](src/StartupController.cpp) | Boot: LED sweep, sensor init + retries, DIAG lines, Pi handshake |
 | `main.cpp` | [src/main.cpp](src/main.cpp) | Globals, `setup()`, task creation, main loop |
 
@@ -157,6 +167,74 @@ board-occupancy transitions; enabling reports the current state immediately.
 The 800 ms release latch means `HANDS_OFF` lags the last release by ~0.8 s.
 Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
 
+## 2.5b Intent classifier (v1.1.0, shadow-first — Config.h §6c/§6d/§6e)
+
+A conservative intent layer on top of the EXPECT_ANY qualification that
+distinguishes deliberate grabs from incidental contact, support/stabilization
+contact, deliberate two-hold chords and arm/body sweeps. It runs on Core 0
+inside `TouchController::tick()` and NEVER makes gameplay decisions — it only
+influences *whether/when* a `TOUCHED` is emitted for open-selection
+(`EXPECT_ANY`/`EXPECT_ANY_EXCEPT`) contexts. Targeted `EXPECT <pos>` remains
+instant and is only *observed* (never filtered).
+
+**Rollout modes** (per context, Config.h §6c):
+`INTENT_FILTER_DISABLED` (0) / `INTENT_FILTER_SHADOW` (1, classify + log but
+never change behavior) / `INTENT_FILTER_ACTIVE` (2, may suppress/defer).
+Defaults: `OPEN_SELECTION_INTENT_FILTER_MODE = SHADOW`,
+`TARGETED_INTENT_FILTER_MODE = DISABLED`. **Tune with telemetry in Shadow
+mode before ever enabling ACTIVE.**
+
+**Model:** press edges open/join an `InteractionEpisode` (ends after 1.5 s
+idle, hard cap 8 s, or on `CLEAN_QUEUE`/context change; max 8
+`TouchCandidate`s, overflow counted, extra presses always pass through).
+Each candidate accumulates per-5 ms-sample evidence: duration, touched
+samples, CAP1188 delta stats (peak/mean/strong-sample %), release state.
+A 0–100 **score** combines persistence (30), touched-sample count (10),
+delta evidence (45, neutral 22 if no delta could be read) and
+still-touched (15).
+
+**Decision at emission time** (`decideEmission`, only consulted for
+open-selection):
+- Valid **chord** (start gap ≤ 350 ms, overlap ≥ 100 ms, similar scores,
+  plausible deltas) → both ALLOW (`VALID_CHORD`).
+- Brief (< 200 ms) **released** candidate dominated by a stronger adjacent
+  competitor → SUPPRESS (`BRIEF_VS_STRONG`) — the only suppression case.
+- Weak but **still-touched** candidate with strong competitor → bounded
+  DEFER (≤ `INTENT_DEFER_MAX_MS` = 400 ms), then ALLOW as ambiguous.
+- Everything else → ALLOW. **Ambiguity always resolves toward emission.**
+
+At episode end undecided candidates are classified for telemetry only:
+sweep-flagged brief contacts → incidental; sustained contact next to a
+stronger emitted hold → possible support; rest → ambiguous.
+
+**Spatial plausibility** uses [src/HoldGeometry.cpp](src/HoldGeometry.cpp)
+(mm coordinates, adjacency = distance ≤ 250 mm,
+`HOLD_ADJACENCY_DISTANCE_SQUARED`). Dominance requires competitor adjacency
+OR a brief candidate.
+
+**Invariants preserved:** `pressConsumed` single-consumption untouched;
+`EXPECT` still fires instantly; suppression requires released + brief +
+dominated; every DEFER is time-bounded; no heap, all state in fixed arrays;
+all timestamps overflow-safe.
+
+**Telemetry** (all via `DIAG` keyword, which the Pi logs and ignores —
+protocol-safe): level 0 = off (default), 1 = episodes + decisions,
+2 = + per-candidate records, 3 = reserved/verbose. Controlled by the `LOG_*`
+commands (§3.2). Line formats:
+
+```
+DIAG TOUCH_EP id=<n> state=start ctx=<open_any|open_except|target> cmd=<id> t=<ms>
+DIAG TOUCH_EP id=<n> state=end reason=<idle|max_duration|cleaned|context_change> cand=<n> flags=0x.. dur=<ms> t=<ms>
+DIAG TOUCH_CAND ep=<n> pos=H<xx> dur=<ms> peak=<d> avg=<d> strong=<pct> samples=<n> flags=0x..
+DIAG TOUCH_DEC ep=<n> pos=H<xx> cls=<class> act=<emit|suppress|defer|ignore> score=<0-100> reason=<...> t=<ms>
+DIAG TOUCH_PERF lvl=.. polls=.. missed=.. i2c_sf=.. i2c_df=.. tick_max_us=.. buf=..
+DIAG TOUCH_PERF emitted=.. suppressed=.. ambig=.. chords=.. sweeps=.. cand_ovf=.. rec_drop=.. noexp=.. nontgt=.. eq_fail=.. eq_max=..
+```
+
+Telemetry output is rate-limited (`TOUCH_LOG_RATE_LIMIT_MS` = 20 ms, max 4
+lines per flush) and only drains when the EventQueue has ≥ 16 free slots
+(`TOUCH_LOG_MIN_QUEUE_HEADROOM`) — gameplay events always win.
+
 ## 2.6 LED system
 
 - Each hold lights a block of `LED_POSITION_WIDTH` = 5 LEDs (center ± 2);
@@ -171,18 +249,26 @@ Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
 ## 2.7 Build, flash, debug
 
 PlatformIO ([platformio.ini](platformio.ini)); default env
-`esp32-s3-devkitc-1`, legacy `esp32dev`.
+`esp32-s3-devkitc-1`, legacy `esp32dev`, host-side `native` (unit tests only).
 
 ```bash
 pio run                      # build (default env)
 pio run -t upload            # flash over USB
 pio device monitor           # 115200 baud serial monitor
 pio run -e esp32dev          # legacy WROOM board
+pio test -e native           # host unit tests (intent classifier + geometry)
 ```
 
 `pio` may not be on PATH → use `~/.platformio/penv/bin/pio`.
 Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
-`EXPECT H05`, `RECALIBRATE_ALL`.
+`EXPECT H05`, `RECALIBRATE_ALL`, `LOG_STATUS`.
+
+Native tests live in
+[test/test_native/test_intent_classifier.cpp](test/test_native/test_intent_classifier.cpp)
+(Unity framework). They compile the Arduino-free units
+(`TouchIntentClassifier`, `HoldGeometry`) directly and cover: scoring,
+brush-by suppression, chords, sweeps, bounded defer, support contacts,
+candidate overflow, exclusion, reset and `millis()` wraparound.
 
 ---
 
@@ -238,12 +324,26 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `HANDSOFF_DETECTION_ON [#id]` | `ACK` + immediate `HANDS_ON`/`HANDS_OFF` | Enable occupancy events, report current state once |
 | `HANDSOFF_DETECTION_OFF [#id]` | `ACK` | Disable occupancy events |
 
+### Telemetry (v1.1.0 — all output uses the Pi-ignored `DIAG` keyword)
+
+| Command | Reply | Behavior |
+|---|---|---|
+| `LOG_ON [#id]` | `ACK` | Enable touch telemetry at `TOUCH_LOG_ON_LEVEL` (1) |
+| `LOG_OFF [#id]` | `ACK` | Disable telemetry (level 0, boot default) |
+| `LOG_LEVEL <0-3> [#id]` | `ACK` (or `ERR invalid_level`) | Set verbosity: 0 off, 1 episodes+decisions, 2 +candidates, 3 verbose |
+| `LOG_STATUS [#id]` | `ACK` + two `DIAG TOUCH_PERF` lines | Dump counters: polls, missed polls, I²C failures, max tick µs, emitted/suppressed/ambiguous/chords/sweeps, drops, EventQueue stats |
+| `LOG_CLEAR [#id]` | `ACK` | Reset telemetry counters + ring buffer |
+| `LOG_DUMP [#id]` | `ACK` + buffered `DIAG` lines | Flush buffered telemetry records even at level 0 |
+
+All answer `ERR no_telemetry` if the telemetry module is not wired (never in
+practice). Names are ≤ 15 chars (§3.4 truncation-safe).
+
 ### Utility
 
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.0.5 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 
 ## 3.3 Responses & events (ESP32 → Pi)
@@ -252,7 +352,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|
 | `ACK` | `ACK <ACTION> [<pos>] [#id]` |
 | `DONE` | `DONE <ACTION> [<pos>] [#id]` |
-| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed` |
+| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `no_telemetry` |
 | `BUSY` | `BUSY [#id]` (queue full — Pi retries) |
 | `TOUCHED` / `TOUCH_RELEASED` | `TOUCHED <pos> [#id]` |
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
@@ -261,7 +361,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `INFO` | `INFO firmware=X protocol=Y board=Z [#id]` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
-| `DIAG ...` | boot diagnostics; Pi logs and ignores |
+| `DIAG ...` | diagnostics; Pi logs and ignores. Boot: I²C scan + per-sensor status. Runtime (v1.1.0): `DIAG TOUCH_EP/TOUCH_CAND/TOUCH_DEC/TOUCH_PERF` telemetry (§2.5b), off by default |
 
 ## 3.4 Quirks the Pi compensates for
 
@@ -472,23 +572,33 @@ app) as the release asset.
 
 ```
 hardware_abstraction_layer/
-├── platformio.ini            # build envs (esp32-s3-devkitc-1 default, esp32dev legacy)
+├── platformio.ini            # build envs (esp32-s3-devkitc-1 default, esp32dev legacy, native tests)
 ├── claude.md                 # THIS FILE — update after every change
 ├── README.md                 # brief project overview
 ├── include/
-│   ├── Config.h              # ALL configuration: pins, timing, colors, INPUT_MAPPINGS
+│   ├── Config.h              # ALL configuration: pins, timing, colors, INPUT_MAPPINGS, intent/telemetry tunables
 │   ├── CommandController.h
 │   ├── EventQueue.h
+│   ├── HoldGeometry.h        # hold (x,y) coordinates + adjacency helpers (Arduino-free)
 │   ├── LedController.h
 │   ├── StartupController.h
-│   └── TouchController.h
+│   ├── TouchController.h
+│   ├── TouchIntentClassifier.h  # intent layer (Arduino-free, natively tested)
+│   ├── TouchIntentTypes.h    # shared intent/telemetry types + ITouchTelemetrySink
+│   └── TouchTelemetry.h      # telemetry ring/counters (ESP32-only)
 ├── src/
 │   ├── main.cpp              # setup(), loop(), FreeRTOS task creation
 │   ├── CommandController.cpp
 │   ├── EventQueue.cpp
+│   ├── HoldGeometry.cpp
 │   ├── LedController.cpp
 │   ├── StartupController.cpp
-│   └── TouchController.cpp
+│   ├── TouchController.cpp
+│   ├── TouchIntentClassifier.cpp
+│   └── TouchTelemetry.cpp
+├── test/
+│   └── test_native/
+│       └── test_intent_classifier.cpp  # Unity host tests (pio test -e native)
 └── RaspberryPI_Kiosk_App/    # checkout of the Pi counterpart (FinnStf/sequenzboard)
     └── sequenzboard/         # read for context — do not modify from here
 ```
@@ -499,6 +609,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.1.0 | Intent-aware touch qualification (§2.5b): `TouchIntentClassifier` groups presses into episodes, scores candidates, classifies intentional/incidental/support/ambiguous/chord/sweep. Ships in **Shadow mode** for open-selection (classify + log only, zero behavior change); Active mode adds bounded DEFER + conservative suppression of brief released brush-bys. New `HoldGeometry` (mm coordinates, adjacency). New telemetry: `LOG_ON/LOG_OFF/LOG_LEVEL/LOG_STATUS/LOG_CLEAR/LOG_DUMP` commands, `DIAG TOUCH_EP/TOUCH_CAND/TOUCH_DEC/TOUCH_PERF` lines (off by default), `TouchTelemetry` ring + counters, EventQueue depth/push-failure gauges + generic `queueDiag()`. New Config §6c/§6d/§6e tunables. New `native` PlatformIO env with 13 Unity unit tests (`pio test -e native`). Protocol fully backward-compatible (additive keywords only) |
 | 1.0.5 | Startup now emits an unsolicited `INFO` line before `HARDWARE INITIALISED`; SHOW color tuned to dark purple (80,0,205) |
 | 1.0.4 | `pressConsumed` single-consumption rule fixes false double touches on re-armed `EXPECT`; SHOW color changed blue → purple |
 | 1.0.3 | Prior baseline (S3 board support, EXPECT_ANY qualification, hands-off detection, DIAG boot output) |

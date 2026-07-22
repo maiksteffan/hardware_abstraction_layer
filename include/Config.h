@@ -21,13 +21,21 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Arduino.h is only available on device builds. Native unit-test builds
+// (pio test -e native) compile the pure-logic modules (TouchIntentClassifier,
+// HoldGeometry) against plain C headers instead.
+#if defined(ARDUINO)
 #include <Arduino.h>
+#else
+#include <stdint.h>
+#include <stddef.h>
+#endif
 
 // ============================================================================
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.0.5"
+#define FIRMWARE_VERSION "1.1.0"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -201,8 +209,103 @@ constexpr uint8_t EXPECT_ANY_EDGE_RING_SIZE = 8;
 // a fresh press edge (release + re-grab) to count.
 constexpr uint16_t EXPECT_HELD_FRESH_MS = 2000;
 
+// ----------------------------------------------------------------------------
+// 6c. INTERACTION-INTENT CLASSIFICATION (incidental-contact handling)
+// ----------------------------------------------------------------------------
+// The intent classifier groups physical contacts into fixed-size
+// "interaction episodes" and classifies each candidate touch as
+// intentional / incidental / support / ambiguous. It only affects what is
+// emitted in OPEN-SELECTION contexts (EXPECT_ANY / EXPECT_ANY_EXCEPT) and
+// only when the filter mode is ACTIVE. See TouchIntentClassifier.h.
+//
+// Modes: 0 = Disabled (classifier off)
+//        1 = Shadow   (classifier runs + logs decisions, output unchanged)
+//        2 = Active   (high-confidence incidental contacts are suppressed,
+//                      weak candidates facing a clearly stronger competitor
+//                      are deferred for a bounded time; ambiguous contacts
+//                      are still emitted)
+//
+// NOTE: All threshold values below are CONSERVATIVE STARTING POINTS derived
+// from the existing 150 ms qualification behavior. They must be tuned with
+// telemetry data (LOG_ON / DIAG TOUCH_* lines) before trusting them.
+// ----------------------------------------------------------------------------
+
+constexpr uint8_t INTENT_FILTER_DISABLED = 0;
+constexpr uint8_t INTENT_FILTER_SHADOW   = 1;
+constexpr uint8_t INTENT_FILTER_ACTIVE   = 2;
+
+// Open-selection contexts (EXPECT_ANY / EXPECT_ANY_EXCEPT).
+// Default SHADOW: gather data first, change nothing the Pi can observe.
+constexpr uint8_t OPEN_SELECTION_INTENT_FILTER_MODE = INTENT_FILTER_SHADOW;
+
+// Expected-target context (EXPECT <pos>). ONLY Disabled/Shadow are
+// implemented: Shadow records diagnostics about non-target contacts during
+// a target window. The expected hold always keeps its instant, unfiltered
+// behavior — targeted qualification is deliberately NOT implemented until
+// telemetry justifies it.
+constexpr uint8_t TARGETED_INTENT_FILTER_MODE = INTENT_FILTER_DISABLED;
+
+// Episode lifecycle
+constexpr uint16_t TOUCH_EPISODE_IDLE_END_MS = 1500;  // no activity -> episode ends
+constexpr uint16_t TOUCH_EPISODE_MAX_MS = 8000;       // hard episode duration cap
+constexpr uint8_t  TOUCH_EPISODE_MAX_CANDIDATES = 8;  // fixed candidate slots per episode
+
+// Intentional-contact evidence
+constexpr uint16_t INTENT_MIN_PERSISTENCE_MS = 250;      // sustained-grip duration
+constexpr int8_t   INTENT_STRONG_DELTA_THRESHOLD = EXPECT_ANY_DELTA_MIN;      // reuse 6b value
+constexpr uint8_t  INTENT_MIN_STRONG_SAMPLE_PERCENT = EXPECT_ANY_DELTA_GOOD_PCT;
+constexpr uint16_t INTENT_MIN_TOUCHED_SAMPLES = 10;      // ~50 ms of contact samples
+constexpr uint8_t  INTENT_EMIT_SCORE = 70;               // score >= this -> intentional
+constexpr uint16_t INTENT_DEFER_MAX_MS = 400;            // max ACTIVE-mode deferral of a weak candidate
+
+// Incidental-contact evidence (ALL must hold before ACTIVE mode suppresses)
+constexpr uint16_t INCIDENTAL_MAX_DURATION_MS = 200;     // released faster than a grip
+constexpr uint16_t INCIDENTAL_MAX_SAMPLE_COUNT = 40;     // ~200 ms of touched samples
+constexpr uint16_t INCIDENTAL_COMPETITOR_WINDOW_MS = 250; // competitor press-start proximity
+constexpr uint8_t  INCIDENTAL_SCORE_MARGIN = 30;         // competitor must score this much higher
+constexpr int8_t   INCIDENTAL_PEAK_DELTA_MARGIN = 16;    // competitor peak-delta dominance
+
+// Chord preservation (two-hold double steps; Pi groups within ~350 ms)
+constexpr uint16_t CHORD_MAX_START_GAP_MS = 350;
+constexpr uint16_t CHORD_MIN_OVERLAP_MS = 100;
+constexpr uint8_t  CHORD_MAX_SCORE_DIFFERENCE = 35;
+
+// Sweep handling reuses the section-6b constants
+// (EXPECT_ANY_SWEEP_TOUCH_COUNT / _WINDOW_MS / _HOLDOFF_MS).
+
 constexpr uint16_t TOUCH_INIT_DELAY_MS = 500;
 constexpr uint16_t TOUCH_RECAL_DELAY_MS = 1500;
+
+// ----------------------------------------------------------------------------
+// 6d. TOUCH TELEMETRY (DIAG TOUCH_* diagnostic output)
+// ----------------------------------------------------------------------------
+// Compact records are written by Core 0 into a fixed ring buffer and
+// formatted/emitted by Core 1 as additive "DIAG TOUCH_..." lines that the Pi
+// logs and ignores (same mechanism as the existing boot DIAG lines).
+// Disabled by default; enable at runtime with LOG_ON / LOG_LEVEL.
+// Telemetry NEVER outranks gameplay events: lines are only queued while the
+// EventQueue has at least TOUCH_LOG_MIN_QUEUE_HEADROOM free slots and are
+// dropped (counted) otherwise.
+// ----------------------------------------------------------------------------
+
+constexpr uint8_t  TOUCH_LOG_DEFAULT_LEVEL = 0;   // 0=off 1=episodes+decisions 2=+candidates 3=reserved (=2)
+constexpr uint8_t  TOUCH_LOG_ON_LEVEL = 1;        // level applied by LOG_ON
+constexpr uint8_t  TOUCH_LOG_MAX_LEVEL = 3;
+constexpr uint8_t  TOUCH_LOG_RING_CAPACITY = 32;  // compact records buffered
+constexpr uint8_t  TOUCH_LOG_MAX_PER_FLUSH = 4;   // max DIAG lines per main-loop tick
+constexpr uint16_t TOUCH_LOG_RATE_LIMIT_MS = 20;  // min gap between flush bursts
+constexpr uint8_t  TOUCH_LOG_MIN_QUEUE_HEADROOM = 16;  // required free EventQueue slots
+
+// ----------------------------------------------------------------------------
+// 6e. HOLD GEOMETRY (spatial adjacency evidence)
+// ----------------------------------------------------------------------------
+// Board coordinates live in HoldGeometry.cpp (integer board units, origin
+// bottom-left). Direct neighbours are ~190 units apart horizontally and
+// ~140 vertically (diagonal ~236); 250^2 covers all direct/diagonal
+// neighbours without reaching two rows/columns away.
+// ----------------------------------------------------------------------------
+
+constexpr uint32_t HOLD_ADJACENCY_DISTANCE_SQUARED = 62500;  // 250^2 board units
 
 // Startup sequence timing
 // Re-broadcast the status line frequently so a Pi that connects/opens the port

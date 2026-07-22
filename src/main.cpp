@@ -32,12 +32,14 @@
 #include "CommandController.h"
 #include "EventQueue.h"
 #include "StartupController.h"
+#include "TouchTelemetry.h"
 
 // ============================================================================
 // Global Instances
 // ============================================================================
 
 EventQueue eventQueue;
+TouchTelemetry touchTelemetry;   // off by default; runtime LOG_ON/LOG_LEVEL
 LedController ledController;
 TouchController touchController;
 CommandController commandController(ledController, &touchController, eventQueue);
@@ -86,6 +88,8 @@ void setup() {
     eventQueue.begin();
     
     touchController.setEventQueue(&eventQueue);
+    touchController.setTelemetry(&touchTelemetry);
+    commandController.setTelemetry(&touchTelemetry);
     
     // Hardware initialization + Pi handshake (blocks until ACK)
     startupController.run();
@@ -124,6 +128,10 @@ void loop() {
     
     // Send pending events over serial
     eventQueue.flush(EVENTS_PER_FLUSH);
+    
+    // Drain buffered touch telemetry into DIAG lines (no-op while disabled;
+    // rate-limited and gated on EventQueue headroom — gameplay always first)
+    touchTelemetry.flush(eventQueue, millis());
     
     // Yield to prevent watchdog timeout
     yield();

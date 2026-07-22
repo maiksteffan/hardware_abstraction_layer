@@ -17,6 +17,8 @@ EventQueue::EventQueue()
     : m_head(0)
     , m_tail(0)
     , m_count(0)
+    , m_pushFailures(0)
+    , m_maxDepth(0)
     , m_queueMutex(nullptr)
     , m_serialMutex(nullptr)
 {
@@ -266,6 +268,18 @@ bool EventQueue::queueHandsOff(uint32_t commandId) {
     return enqueue(event);
 }
 
+bool EventQueue::queueDiag(const char* text) {
+    Event event;
+    event.type = EventType::DIAG;
+    event.action[0] = '\0';
+    event.position[0] = '\0';
+    event.commandId = COMMAND_ID_NONE;  // DIAG lines never carry a #id
+    strncpy(event.extra, text, sizeof(event.extra) - 1);
+    event.extra[sizeof(event.extra) - 1] = '\0';
+    event.valid = true;
+    return enqueue(event);
+}
+
 // ============================================================================
 // Private Methods
 // ============================================================================
@@ -278,11 +292,15 @@ bool EventQueue::enqueue(const Event& event) {
             m_events[m_head] = event;
             m_head = (m_head + 1) % QUEUE_SIZE_EVENTS;
             m_count++;
+            if (m_count > m_maxDepth) m_maxDepth = m_count;
             success = true;
         }
         xSemaphoreGive(m_queueMutex);
     }
     
+    if (!success) {
+        m_pushFailures++;  // diagnostic counter; occasional race is tolerable
+    }
     return success;
 }
 
@@ -354,6 +372,10 @@ void EventQueue::sendEvent(const Event& event) {
             
         case EventType::HANDS_OFF:
             length = snprintf(buffer, sizeof(buffer), "HANDS_OFF");
+            break;
+            
+        case EventType::DIAG:
+            length = snprintf(buffer, sizeof(buffer), "DIAG %s", event.extra);
             break;
     }
     
