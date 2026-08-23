@@ -2,7 +2,8 @@
  * @file LedController.h
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages LED_POSITION_COUNT (34) logical LED positions (H01-H34) mapped to two physical LED strips.
+ * Manages the active board profile's logical LED positions (H01..H{holdCount})
+ * mapped to two physical LED strips.
  * Supports SHOW, HIDE, SUCCESS, BLINK, STOP_BLINK, and SEQUENCE_COMPLETED.
  */
 
@@ -17,21 +18,8 @@
 // Types
 // ============================================================================
 
-enum class StripId : uint8_t { STRIP1 = 0, STRIP2 = 1 };
-
-struct LedMapping {
-    StripId strip;
-    uint8_t index;
-};
-
-// Optional second physical LED for a logical position, so a single command
-// (SHOW/SUCCESS/HIDE/...) lights up both sides. Only positions that need a
-// mirror are listed in LED_MIRRORS; everything else has a single LED.
-struct LedMirror {
-    uint8_t position;   // 0-based logical position (e.g. 3 == H04)
-    StripId strip;
-    uint8_t index;
-};
+// StripId, LedMapping and LedMirror come from BoardProfile.h (via Config.h):
+// they describe wiring, which is per board version.
 
 enum class PositionState : uint8_t {
     OFF,
@@ -101,7 +89,9 @@ public:
 private:
     Adafruit_NeoPixel m_strip1;
     Adafruit_NeoPixel m_strip2;
-    PositionData m_positions[LED_POSITION_COUNT];
+    // Sized to the ceiling, not the active profile: the profile is only known
+    // at runtime. Loops and bounds checks use activeBoardProfile().holdCount.
+    PositionData m_positions[MAX_HOLDS];
     
     bool m_sequenceAnimActive;
     uint8_t m_sequenceAnimStep;

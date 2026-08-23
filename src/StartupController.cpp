@@ -117,7 +117,7 @@ void StartupController::initSensors() {
         m_touchController.begin();
         delay(SENSOR_INIT_DELAY_MS);
 
-        if (m_touchController.getActiveSensorCount() >= TOUCH_SENSOR_COUNT) {
+        if (m_touchController.getActiveSensorCount() >= activeBoardProfile().sensorCount) {
             allFound = true;
             break;
         }
@@ -142,7 +142,7 @@ void StartupController::initSensors() {
     // Per-sensor init outcome (re-runs init once more to capture the reason
     // each sensor passed/failed). diagInitSensor() updates the active flag
     // accordingly, so this also acts as a final init pass.
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < activeBoardProfile().sensorCount; s++) {
         char diag[96];
         m_touchController.diagInitSensor(s, diag, sizeof(diag));
         m_serial.print("DIAG ");
@@ -160,7 +160,7 @@ void StartupController::initSensors() {
         }
     }
     // If every logical input is covered we still report READY, otherwise FAILED.
-    allFound = (activeCount >= INPUT_COUNT);
+    allFound = (activeCount >= activeBoardProfile().holdCount);
 
     if (allFound) {
         strncpy(m_statusMsg, "SENSORS READY", sizeof(m_statusMsg) - 1);

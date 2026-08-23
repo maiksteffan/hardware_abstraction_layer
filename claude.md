@@ -63,11 +63,28 @@ Current versions ([include/Config.h](include/Config.h)):
 | Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, 7 channels used per chip |
 | Legacy board | classic ESP32 WROOM still buildable via `pio run -e esp32dev` (pins overridden by build flags) |
 
-The wiring table `INPUT_MAPPINGS[34] = {sensorIndex, channel}` in
-[include/Config.h](include/Config.h) maps each logical hold `H01`–`H34` to a
-physical chip+channel. `LED_MAPPINGS[]` / `LED_MIRRORS[]` in
-[src/LedController.cpp](src/LedController.cpp) map each hold to strip
-positions (a mirror = second LED block for the same hold on the other strip).
+### Board profiles
+
+One binary serves every physical board build. Everything that differs between
+builds — hold count, sensor count and I²C addresses, `inputMappings[]`
+(hold → chip+channel), `ledMappings[]` / `ledMirrors[]` (hold → strip position;
+a mirror = second LED block for the same hold on the other strip), LED width
+and strip lengths — lives in a `BoardProfile`.
+
+Profiles are declared in [src/BoardProfiles.cpp](src/BoardProfiles.cpp), the
+types and ceilings in [include/BoardProfile.h](include/BoardProfile.h). Read
+the active one with `activeBoardProfile()`; **never** hard-code a hold or
+sensor count. Per-hold arrays are sized `MAX_HOLDS` (99, the cap implied by the
+4-byte position token) and per-sensor arrays `MAX_SENSORS`, while every loop
+bound and range check uses the active profile's counts.
+
+Adding a board version = one entry in `PROFILES[]`. Rewiring an existing board
+is a **new slug**, not an edit: the Pi has no other way to tell two wirings of
+`v1` apart.
+
+The Pi names the profile during the startup handshake; until then the default
+profile is active. See `docs/Board_Version_Firmware_Profiles.md` in the
+Sequenzboard repo.
 
 ## 2.2 Dual-core FreeRTOS architecture
 
@@ -122,7 +139,7 @@ Runs on Core 0 every 5 ms:
 
 1. Read each active CAP1188's status register **once** per cycle (cached in
    `PhysicalSensor::lastStatus`) — never per-input reads.
-2. Update the 34 logical inputs via `INPUT_MAPPINGS`.
+2. Update the profile's logical inputs via `inputMappings`.
 3. Clear the INT bit on chips that reported a touch (keeps latching alive).
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
@@ -424,14 +441,16 @@ app) as the release asset.
 - **No heap allocation after `setup()`.** No `new`/`malloc` in steady state,
   no `String` — fixed-size `char` buffers with `snprintf` and explicit
   null-termination.
-- ALL configuration lives in [include/Config.h](include/Config.h) as
-  `constexpr` (or `#define` with `#ifndef` guards where build-flag overrides
-  are needed). Never hard-code magic numbers in .cpp files.
-- Fixed-size arrays sized by Config constants; guard every index
-  (`if (i >= INPUT_COUNT) return;`).
+- Board-independent configuration lives in [include/Config.h](include/Config.h)
+  as `constexpr` (or `#define` with `#ifndef` guards where build-flag overrides
+  are needed); board-specific wiring lives in a `BoardProfile`. Never hard-code
+  magic numbers in .cpp files.
+- Fixed-size arrays sized by the `MAX_*` ceilings in
+  [include/BoardProfile.h](include/BoardProfile.h); guard every index against
+  the *active profile* (`if (i >= activeBoardProfile().holdCount) return;`).
 - Explicit `uint8_t`/`uint16_t`/`uint32_t`. Positions are input indices
-  `0..33` internally, `"H01".."H34"` strings on the wire — convert only via
-  `CommandController::parsePosition()` / `indexToPosition()`.
+  `0..holdCount-1` internally, `"H01".."H99"` strings on the wire — convert
+  only via `CommandController::parsePosition()` / `indexToPosition()`.
 
 ## 6.2 Concurrency
 
@@ -476,7 +495,8 @@ hardware_abstraction_layer/
 ├── claude.md                 # THIS FILE — update after every change
 ├── README.md                 # brief project overview
 ├── include/
-│   ├── Config.h              # ALL configuration: pins, timing, colors, INPUT_MAPPINGS
+│   ├── Config.h              # board-independent config: pins, timing, colors
+│   ├── BoardProfile.h        # per-board wiring types, ceilings, profile registry API
 │   ├── CommandController.h
 │   ├── EventQueue.h
 │   ├── LedController.h
@@ -484,6 +504,7 @@ hardware_abstraction_layer/
 │   └── TouchController.h
 ├── src/
 │   ├── main.cpp              # setup(), loop(), FreeRTOS task creation
+│   ├── BoardProfiles.cpp     # the board profiles this firmware ships
 │   ├── CommandController.cpp
 │   ├── EventQueue.cpp
 │   ├── LedController.cpp

@@ -2,85 +2,22 @@
  * @file LedController.cpp
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages LED_POSITION_COUNT (34) logical LED positions (H01-H34) mapped to two physical strips.
- * All configurable values are defined in Config.h.
+ * Manages the active board profile's logical LED positions (H01..H{holdCount})
+ * mapped to two physical strips. Timing and colors come from Config.h; the
+ * wiring tables come from the active BoardProfile.
  */
 
 #include "LedController.h"
 
 // ============================================================================
-// LED Position Mappings (H01-H34 mapped to physical LED indices)
-// ============================================================================
-// Each position maps to a strip (1 or 2) and an index on that strip.
-//
-// TODO (user): set the correct {strip, ledIndex} for each input H01..H34 to
-// match the real wiring. Placeholder values below all point to LED 0 of
-// strip 1; the firmware will compile and run but every input will light up
-// the same physical LED until you fill in the real layout.
-// ============================================================================
-
-static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 216 },  //H01
-    { StripId::STRIP2, 204 },  //H02 
-    { StripId::STRIP2, 193 },  //H03 
-    { StripId::STRIP2, 184 },  //H04
-    // { StripId::STRIP1, 184 },  //H04(2)
-    { StripId::STRIP1, 193 },   //H05
-    { StripId::STRIP1, 204 },  //H06
-    { StripId::STRIP1, 216 },  //H07
-    { StripId::STRIP2, 141 },  //H08  
-    { StripId::STRIP2, 152 },   //H09
-    { StripId::STRIP2, 164 },  //H10
-    { StripId::STRIP2, 172 },  //H11
-    { StripId::STRIP1, 171 },   //H12
-    { StripId::STRIP1, 163 },   //H13
-    { StripId::STRIP1, 152 },   //H14
-    { StripId::STRIP1, 141 },   //H15
-    { StripId::STRIP2, 122 },  //H16
-    { StripId::STRIP2, 110 }, //H17
-    { StripId::STRIP2, 100 },  //H18
-    { StripId::STRIP2, 90 },   //H19
-    //{ StripId::STRIP1, 90 },   //H19 (2)
-    { StripId::STRIP1, 99 },  //H20
-    { StripId::STRIP1, 111 }, //H21
-    { StripId::STRIP1, 122 }, //H22
-    { StripId::STRIP2, 49 },  //H23
-    { StripId::STRIP2, 60 },  //H24
-    { StripId::STRIP2, 72 },  //H25
-    { StripId::STRIP1, 72 },  //H26
-    { StripId::STRIP1, 60 },  //H27
-    { StripId::STRIP1, 49 },  //H28
-    { StripId::STRIP2, 30 },  //H29 
-    { StripId::STRIP2, 18 },  //H30
-    { StripId::STRIP2, 7 },  //H31
-    { StripId::STRIP1, 7 },   //H32
-    { StripId::STRIP1, 18 },   //H33
-    { StripId::STRIP1, 30 },    //H34
-};
-
-// ============================================================================
-// LED Mirrors (positions that also drive a second physical LED)
-// ============================================================================
-// Some logical positions are wired to an LED on both strips. Every command for
-// such a position (SHOW, SUCCESS, HIDE, BLINK, expand/contract animations, ...)
-// lights up both LEDs automatically. Add a line here to give any position a
-// second LED; positions not listed keep their single LED from LED_MAPPINGS.
-// ============================================================================
-
-static const LedMirror LED_MIRRORS[] = {
-    { 3,  StripId::STRIP1, 184 },  // H04 -> mirror on strip 1
-    { 18, StripId::STRIP1, 90  },  // H19 -> mirror on strip 1
-};
-
-static constexpr uint8_t LED_MIRROR_COUNT = sizeof(LED_MIRRORS) / sizeof(LED_MIRRORS[0]);
-
-// ============================================================================
 // Constructor
 // ============================================================================
 
+// Strips start empty: their length comes from the board profile, which is not
+// known until the Pi has named it. begin() allocates them via updateLength().
 LedController::LedController()
-    : m_strip1(LED_STRIP_1_LENGTH, PIN_LED_STRIP_1, NEO_GRB + NEO_KHZ800)
-    , m_strip2(LED_STRIP_2_LENGTH, PIN_LED_STRIP_2, NEO_GRB + NEO_KHZ800)
+    : m_strip1(0, PIN_LED_STRIP_1, NEO_GRB + NEO_KHZ800)
+    , m_strip2(0, PIN_LED_STRIP_2, NEO_GRB + NEO_KHZ800)
     , m_sequenceAnimActive(false)
     , m_sequenceAnimStep(0)
     , m_sequenceAnimLastTime(0)
@@ -103,6 +40,10 @@ LedController::LedController()
 // ============================================================================
 
 void LedController::begin() {
+    const BoardProfile& profile = activeBoardProfile();
+    m_strip1.updateLength(min(profile.strip1Length, MAX_LED_STRIP_LENGTH));
+    m_strip2.updateLength(min(profile.strip2Length, MAX_LED_STRIP_LENGTH));
+
     m_strip1.begin();
     m_strip2.begin();
     m_strip1.setBrightness(LED_BRIGHTNESS_DEFAULT);
@@ -112,7 +53,7 @@ void LedController::begin() {
     m_strip1.show();
     m_strip2.show();
     
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].lastAnimationTime = 0;
@@ -132,7 +73,7 @@ void LedController::tick() {
 
 void LedController::update(uint32_t nowMillis) {
     // Update animations
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         if (m_positions[i].state == PositionState::ANIMATING) {
             updateAnimation(i, nowMillis);
         } else if (m_positions[i].state == PositionState::CONTRACTING) {
@@ -162,7 +103,7 @@ void LedController::update(uint32_t nowMillis) {
 }
 
 bool LedController::show(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -184,7 +125,7 @@ bool LedController::show(uint8_t position) {
 }
 
 bool LedController::hide(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -204,7 +145,7 @@ void LedController::hideAll() {
     m_strip1.clear();
     m_strip2.clear();
     
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
@@ -216,7 +157,7 @@ void LedController::hideAll() {
 }
 
 bool LedController::success(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -243,7 +184,7 @@ bool LedController::success(uint8_t position) {
 }
 
 bool LedController::fail(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -263,7 +204,7 @@ bool LedController::fail(uint8_t position) {
 }
 
 bool LedController::contract(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -286,7 +227,7 @@ bool LedController::contract(uint8_t position) {
 }
 
 bool LedController::blink(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -308,7 +249,7 @@ bool LedController::blink(uint8_t position) {
 }
 
 bool LedController::stopBlink(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     if (m_positions[position].state != PositionState::BLINKING) {
         return true;
@@ -328,7 +269,7 @@ bool LedController::stopBlink(uint8_t position) {
 }
 
 bool LedController::expandStep(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -356,7 +297,7 @@ bool LedController::expandStep(uint8_t position) {
 }
 
 bool LedController::contractStep(uint8_t position) {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
@@ -441,7 +382,7 @@ void LedController::indicateRecording() {
 
     m_strip1.clear();
     m_strip2.clear();
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
@@ -456,17 +397,17 @@ void LedController::indicateRecording() {
 }
 
 bool LedController::isAnimationComplete(uint8_t position) const {
-    if (position >= LED_POSITION_COUNT) return true;
+    if (position >= activeBoardProfile().holdCount) return true;
     return m_positions[position].state != PositionState::ANIMATING;
 }
 
 bool LedController::isContractComplete(uint8_t position) const {
-    if (position >= LED_POSITION_COUNT) return true;
+    if (position >= activeBoardProfile().holdCount) return true;
     return m_positions[position].state != PositionState::CONTRACTING;
 }
 
 bool LedController::isBlinking(uint8_t position) const {
-    if (position >= LED_POSITION_COUNT) return false;
+    if (position >= activeBoardProfile().holdCount) return false;
     return m_positions[position].state == PositionState::BLINKING;
 }
 
@@ -475,13 +416,14 @@ bool LedController::isBlinking(uint8_t position) const {
 // ============================================================================
 
 const LedMapping* LedController::getMapping(uint8_t position) const {
-    if (position >= LED_POSITION_COUNT) return nullptr;
-    return &LED_MAPPINGS[position];
+    if (position >= activeBoardProfile().holdCount) return nullptr;
+    return &activeBoardProfile().ledMappings[position];
 }
 
 const LedMirror* LedController::getMirror(uint8_t position) const {
-    for (uint8_t i = 0; i < LED_MIRROR_COUNT; i++) {
-        if (LED_MIRRORS[i].position == position) return &LED_MIRRORS[i];
+    const BoardProfile& profile = activeBoardProfile();
+    for (uint8_t i = 0; i < profile.ledMirrorCount; i++) {
+        if (profile.ledMirrors[i].position == position) return &profile.ledMirrors[i];
     }
     return nullptr;
 }
@@ -490,11 +432,11 @@ void LedController::paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
 
-    // Each logical position covers a core of LED_POSITION_WIDTH physical LEDs
+    // Each logical position covers a core of ledPositionWidth physical LEDs
     // centered on the mapped index. Offset 0 paints the whole core; nonzero
     // offsets (expansion rings) are shifted outward past the core edge so
     // they never overlap it.
-    constexpr int16_t half = (LED_POSITION_WIDTH - 1) / 2;
+    const int16_t half = (int16_t)(activeBoardProfile().ledPositionWidth - 1) / 2;
     const LedMirror* mirror = getMirror(position);
 
     if (offset == 0) {
@@ -514,7 +456,8 @@ Adafruit_NeoPixel* LedController::getStrip(StripId strip) {
 }
 
 uint16_t LedController::getStripLength(StripId strip) const {
-    return (strip == StripId::STRIP1) ? LED_STRIP_1_LENGTH : LED_STRIP_2_LENGTH;
+    const BoardProfile& profile = activeBoardProfile();
+    return (strip == StripId::STRIP1) ? profile.strip1Length : profile.strip2Length;
 }
 
 void LedController::setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, uint8_t b) {
@@ -631,7 +574,7 @@ void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis
 }
 
 void LedController::updateBlinking(uint32_t nowMillis) {
-    for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         if (m_positions[i].state == PositionState::BLINKING) {
             PositionData& data = m_positions[i];
             
@@ -666,7 +609,7 @@ void LedController::updateSequenceCompletedAnimation(uint32_t nowMillis) {
         m_strip2.clear();
         m_needsUpdate = true;
         
-        for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+        for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
             m_positions[i].state = PositionState::OFF;
             m_positions[i].animationStep = 0;
         }
@@ -686,10 +629,10 @@ void LedController::updateSequenceCompletedAnimation(uint32_t nowMillis) {
         brightness = LED_SEQUENCE_MAX_BRIGHTNESS - (fadeOutPos * LED_SEQUENCE_MAX_BRIGHTNESS) / LED_SEQUENCE_PULSE_STEPS;
     }
     
-    for (uint16_t i = 0; i < LED_STRIP_1_LENGTH; i++) {
+    for (uint16_t i = 0; i < getStripLength(StripId::STRIP1); i++) {
         m_strip1.setPixelColor(i, m_strip1.Color(0, brightness, 0));
     }
-    for (uint16_t i = 0; i < LED_STRIP_2_LENGTH; i++) {
+    for (uint16_t i = 0; i < getStripLength(StripId::STRIP2); i++) {
         m_strip2.setPixelColor(i, m_strip2.Color(0, brightness, 0));
     }
     m_needsUpdate = true;
@@ -708,7 +651,7 @@ void LedController::updateDefeatAnimation(uint32_t nowMillis) {
         m_strip2.clear();
         m_needsUpdate = true;
         
-        for (uint8_t i = 0; i < LED_POSITION_COUNT; i++) {
+        for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
             m_positions[i].state = PositionState::OFF;
             m_positions[i].animationStep = 0;
         }
@@ -729,10 +672,10 @@ void LedController::updateDefeatAnimation(uint32_t nowMillis) {
     }
     
     // Red full-board pulse
-    for (uint16_t i = 0; i < LED_STRIP_1_LENGTH; i++) {
+    for (uint16_t i = 0; i < getStripLength(StripId::STRIP1); i++) {
         m_strip1.setPixelColor(i, m_strip1.Color(brightness, 0, 0));
     }
-    for (uint16_t i = 0; i < LED_STRIP_2_LENGTH; i++) {
+    for (uint16_t i = 0; i < getStripLength(StripId::STRIP2); i++) {
         m_strip2.setPixelColor(i, m_strip2.Color(brightness, 0, 0));
     }
     m_needsUpdate = true;
