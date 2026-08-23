@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.0.5"
+#define FIRMWARE_VERSION "1.1.0"
 #define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -122,6 +122,13 @@ constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = SENSOR_LIST_BUFFER_SIZE + 64;
 
 // Serial wait timeout (milliseconds)
 constexpr uint16_t SERIAL_WAIT_TIMEOUT_MS = 3000;
+
+// How long the boot sequence waits for the Pi to name a board profile
+// (BOARD_VERSION) before falling back to the default profile. Only ever paid
+// in full when nothing answers — a dev flash with no Pi attached, or Pi
+// software old enough not to send it. A connected Pi replies within
+// milliseconds of the INFO banner.
+constexpr uint16_t BOARD_VERSION_TIMEOUT_MS = 3000;
 
 // Mutex timeout values (milliseconds)
 constexpr uint16_t MUTEX_TIMEOUT_QUEUE_MS  = 10;

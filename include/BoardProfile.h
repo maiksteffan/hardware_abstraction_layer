@@ -147,4 +147,21 @@ const char* requestedBoardProfile();
 /// True when selectBoardProfile() rejected a slug and fell back to the default.
 bool boardProfileMismatch();
 
+// ============================================================================
+// INFO line
+// ============================================================================
+
+/// Write the `INFO ...` line describing this firmware into `buffer`.
+///
+/// Single source of the INFO format: the startup banner and the INFO command
+/// response must not drift apart, because the Pi parses both.
+///
+/// `withSelection` adds `boardVersion=` / `holds=` (and `requested=` /
+/// `mismatch=1` after a rejected slug). Pass false before a profile has been
+/// chosen — the banner that tells the Pi which profiles it may ask for.
+///
+/// Returns the number of characters written, excluding the terminator. Output
+/// is truncated rather than overflowed when `size` is too small.
+size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection);
+
 #endif // BOARD_PROFILE_H

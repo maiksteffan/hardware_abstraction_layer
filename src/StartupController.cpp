@@ -38,26 +38,99 @@ void StartupController::run() {
     // this line (unknown keyword) or use it to (re)start its handshake routine.
     m_serial.println("ESP32 BOOT");
 
-    // Step 1 — LED initialization + visual-confirmation sweep
+    // Step 1 — Announce what this firmware is and which board profiles it can
+    // serve, then let the Pi pick one. This has to happen before any hardware
+    // init: the LED and sensor tables are per-profile.
+    flushInput();
+    sendInfo(false);
+    awaitBoardVersion();
+
+    // Step 2 — LED initialization + visual-confirmation sweep
     initLeds();
 
-    // Step 2 — Sensor initialization with retries, builds m_statusMsg
+    // Step 3 — Sensor initialization with retries, builds m_statusMsg
     initSensors();
 
-    // Step 3 — Handshake loop (blocks until ACK received)
+    // Step 4 — Handshake loop (blocks until ACK received)
     handshakeLoop();
 
-    // Announce metadata on every boot. New Pi software also queries INFO after
-    // connecting so older installed firmware remains compatible.
-    m_serial.print("INFO firmware=");
-    m_serial.print(FIRMWARE_VERSION);
-    m_serial.print(" protocol=");
-    m_serial.print(PROTOCOL_VERSION);
-    m_serial.print(" board=");
-    m_serial.println(BOARD_TYPE);
+    // Announce metadata on every boot, now including the profile that was
+    // actually activated. New Pi software also queries INFO after connecting,
+    // so older installed firmware remains compatible.
+    sendInfo(true);
 
     // Signal completion after all startup metadata has been emitted.
     m_serial.println("HARDWARE INITIALISED");
+}
+
+// ============================================================================
+// Step 1: Board Profile Negotiation
+// ============================================================================
+
+void StartupController::sendInfo(bool withSelection) {
+    char line[EVENT_MESSAGE_BUFFER_SIZE];
+    buildBoardInfoLine(line, sizeof(line), withSelection);
+    m_serial.println(line);
+}
+
+void StartupController::awaitBoardVersion() {
+    const uint32_t start = millis();
+
+    while (millis() - start < BOARD_VERSION_TIMEOUT_MS) {
+        if (!readLine()) {
+            delay(1);  // Yield to avoid tight-spinning
+            continue;
+        }
+
+        // Match the keyword exactly — "BOARD_VERSIONv1" is not this command.
+        if (strncmp(m_lineBuf, "BOARD_VERSION", 13) == 0 &&
+            (m_lineBuf[13] == '\0' || m_lineBuf[13] == ' ')) {
+            char* slug = m_lineBuf + 13;
+            while (*slug == ' ') slug++;
+            // Cut anything trailing the slug, so "v1 junk" never becomes a slug.
+            for (char* end = slug; *end; end++) {
+                if (*end == ' ' || *end == '\t') { *end = '\0'; break; }
+            }
+            applyBoardVersion(slug);
+            return;
+        }
+
+        // Anything else this early is boot noise or a Pi probe. Re-announce so
+        // a Pi that connected late still learns which profiles it may ask for.
+        sendInfo(false);
+    }
+
+    // Timed out: nothing answered, so the default profile stays active. This is
+    // the normal path for a dev flash with no Pi attached.
+}
+
+void StartupController::applyBoardVersion(const char* slug) {
+    if (slug[0] == '\0') {
+        // "BOARD_VERSION" with no argument. Not a mismatch — there is nothing
+        // to be incompatible with — so leave the default active and say so.
+        m_serial.println("ERR bad_format");
+        return;
+    }
+
+    if (selectBoardProfile(slug)) {
+        m_serial.print("ACK BOARD_VERSION ");
+        m_serial.print(activeBoardProfile().slug);
+        m_serial.print(" holds=");
+        m_serial.println(activeBoardProfile().holdCount);
+        return;
+    }
+
+    // Unknown slug: selectBoardProfile() kept the default active, so the board
+    // still boots. Report what is available; the Pi surfaces this as
+    // "firmware does not know this board version" and prompts for an update.
+    m_serial.print("ERR unknown_board_version ");
+    m_serial.print(requestedBoardProfile());
+    m_serial.print(" [");
+    for (uint8_t i = 0; i < boardProfileCount(); i++) {
+        if (i > 0) m_serial.print(",");
+        m_serial.print(boardProfileAt(i).slug);
+    }
+    m_serial.println("]");
 }
 
 // ============================================================================

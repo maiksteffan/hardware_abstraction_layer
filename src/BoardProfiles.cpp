@@ -11,6 +11,9 @@
 #include "BoardProfile.h"
 #include "Config.h"
 
+#include <stdarg.h>
+#include <stdio.h>
+
 // ============================================================================
 // Profile "v1" — the 34-hold board this project shipped with
 // ============================================================================
@@ -170,4 +173,46 @@ const char* requestedBoardProfile() {
 
 bool boardProfileMismatch() {
     return s_mismatch;
+}
+
+// ============================================================================
+// INFO line
+// ============================================================================
+
+/// Append to `buffer` at `offset`, keeping the result terminated and bounded.
+static size_t appendTo(char* buffer, size_t size, size_t offset, const char* fmt, ...) {
+    if (offset >= size) return offset;
+    va_list args;
+    va_start(args, fmt);
+    int written = vsnprintf(buffer + offset, size - offset, fmt, args);
+    va_end(args);
+    if (written < 0) return offset;
+    size_t next = offset + (size_t)written;
+    return (next >= size) ? size - 1 : next;
+}
+
+size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection) {
+    if (!buffer || size == 0) return 0;
+    buffer[0] = '\0';
+
+    size_t length = appendTo(buffer, size, 0, "INFO firmware=%s protocol=%s board=%s",
+                             FIRMWARE_VERSION, PROTOCOL_VERSION, BOARD_TYPE);
+
+    length = appendTo(buffer, size, length, " profiles=");
+    for (uint8_t i = 0; i < boardProfileCount(); i++) {
+        length = appendTo(buffer, size, length, "%s%s", i ? "," : "", boardProfileAt(i).slug);
+    }
+    length = appendTo(buffer, size, length, " default=%s", defaultBoardProfile().slug);
+
+    if (withSelection) {
+        const BoardProfile& profile = activeBoardProfile();
+        length = appendTo(buffer, size, length, " boardVersion=%s holds=%u",
+                          profile.slug, (unsigned)profile.holdCount);
+        if (boardProfileMismatch()) {
+            length = appendTo(buffer, size, length, " requested=%s mismatch=1",
+                              requestedBoardProfile());
+        }
+    }
+
+    return length;
 }

@@ -340,8 +340,10 @@ void EventQueue::sendEvent(const Event& event) {
             break;
             
         case EventType::INFO:
-            length = snprintf(buffer, sizeof(buffer), "INFO firmware=%s protocol=%s board=%s",
-                             FIRMWARE_VERSION, PROTOCOL_VERSION, BOARD_TYPE);
+            // Same builder as the startup banner, so the two never drift apart.
+            // Includes the active profile: by the time the Pi can send INFO as
+            // a command, negotiation is long finished.
+            length = (int)buildBoardInfoLine(buffer, sizeof(buffer), true);
             break;
             
         case EventType::VALUE:

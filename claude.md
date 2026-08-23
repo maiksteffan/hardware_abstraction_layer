@@ -119,6 +119,8 @@ loop():                                        // Core 1
 
 ## 2.4 Startup sequence (blocks inside `setup()`)
 
+0. **`ESP32 BOOT`** banner, then **profile negotiation** — see below. Must come
+   before LED and sensor init, which read the per-profile wiring tables.
 1. **LED init** + white pixel sweep (visual boot confirmation).
 2. **Sensor init**, up to `SENSOR_INIT_MAX_RETRIES` (3) attempts.
 3. **Diagnostics on the wire** (Pi logs, ignores unknown keywords):
@@ -129,9 +131,30 @@ loop():                                        // Core 1
    `ACK SENSORS READY` / `ACK SENSORS FAILED`.
    ⚠ The list inside `SENSORS FAILED [...]` contains the **active** inputs;
    the Pi computes the failed set as the complement.
-5. Sends an unsolicited `INFO firmware=... protocol=... board=...` line
-   (boot metadata; the Pi also still queries `INFO` after connecting), then
-   `HARDWARE INITIALISED` → touch task is created, normal operation.
+5. Sends the resolved `INFO` line — now including `boardVersion=` / `holds=` —
+   then `HARDWARE INITIALISED` → touch task is created, normal operation.
+   (The Pi also still queries `INFO` after connecting.)
+
+### Profile negotiation (step 0)
+
+```
+ESP32 -> ESP32 BOOT
+ESP32 -> INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1
+Pi    -> BOARD_VERSION v1
+ESP32 -> ACK BOARD_VERSION v1 holds=34
+```
+
+- The Pi has up to `BOARD_VERSION_TIMEOUT_MS` (3 s) to answer. On timeout the
+  **default profile** stays active and boot continues — that is the normal path
+  for a dev flash with no Pi attached.
+- Unknown slug → `ERR unknown_board_version <slug> [<available>]`, the default
+  profile stays active, and the later `INFO` carries `requested=<slug>
+  mismatch=1`. The board boots wrong-but-diagnosable rather than not at all.
+- Any other line during the wait re-triggers the `INFO` banner, so a
+  late-connecting Pi can still drive the exchange.
+- `buildBoardInfoLine()` in [src/BoardProfiles.cpp](src/BoardProfiles.cpp) is the
+  single source of the `INFO` format — the banner and the `INFO` command
+  response must not drift, because the Pi parses both.
 
 ## 2.5 Touch pipeline (the tricky part — read before touching TouchController)
 
@@ -260,7 +283,8 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.0.5 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 
 ## 3.3 Responses & events (ESP32 → Pi)
@@ -269,13 +293,13 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|
 | `ACK` | `ACK <ACTION> [<pos>] [#id]` |
 | `DONE` | `DONE <ACTION> [<pos>] [#id]` |
-| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed` |
+| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `unknown_board_version` (boot only) |
 | `BUSY` | `BUSY [#id]` (queue full — Pi retries) |
 | `TOUCHED` / `TOUCH_RELEASED` | `TOUCHED <pos> [#id]` |
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
-| `INFO` | `INFO firmware=X protocol=Y board=Z [#id]` |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
 | `DIAG ...` | boot diagnostics; Pi logs and ignores |
@@ -298,8 +322,12 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 - **Never change existing keywords, grammar, ordering or `#id` semantics.**
 - Bump `FIRMWARE_VERSION` (semver) on every released change; bump
   `PROTOCOL_VERSION` only when message syntax/semantics change.
-- New functionality = new keywords (additive), never repurposed ones.
+- New functionality = new keywords (additive), never repurposed ones. New
+  `INFO` fields are additive too: the Pi ignores keys it does not know, and
+  firmware older than 1.1.0 simply omits the profile keys.
 - The Pi pins `REQUIRED_FIRMWARE_VERSION` and verifies `INFO` after flashing.
+  This is being replaced by a profile-membership check — see
+  `docs/Board_Version_Firmware_Profiles.md` in the Sequenzboard repo.
 
 ---
 
@@ -520,6 +548,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.1.0 | Board profiles: one binary serves several board builds. New `BOARD_VERSION <slug>` boot command, `INFO` gains `profiles=`/`default=`/`boardVersion=`/`holds=`/`requested=`/`mismatch=`, wiring tables moved from `Config.h` + `LedController.cpp` into `PROFILES[]`. `excludeMask` is now a `HoldMask` bitset (a `uint64_t` would have capped the board at 64 holds). Fixes `m_statusMsg` truncating the `SENSORS FAILED [...]` list at 64 bytes |
 | 1.0.5 | Startup now emits an unsolicited `INFO` line before `HARDWARE INITIALISED`; SHOW color tuned to dark purple (80,0,205) |
 | 1.0.4 | `pressConsumed` single-consumption rule fixes false double touches on re-armed `EXPECT`; SHOW color changed blue → purple |
 | 1.0.3 | Prior baseline (S3 board support, EXPECT_ANY qualification, hands-off detection, DIAG boot output) |

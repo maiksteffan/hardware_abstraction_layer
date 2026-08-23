@@ -4,9 +4,13 @@
  * 
  * Called from setup() before any FreeRTOS tasks are created.
  * 
- * Step 1 — LED initialization with visual-confirmation sweep
- * Step 2 — Sensor initialization with retries
- * Step 3 — Handshake loop: broadcasts a single status message until the Pi ACKs
+ * Step 1 — Announce INFO, then wait for the Pi to name a board profile
+ * Step 2 — LED initialization with visual-confirmation sweep
+ * Step 3 — Sensor initialization with retries
+ * Step 4 — Handshake loop: broadcasts a single status message until the Pi ACKs
+ *
+ * The profile must be settled before step 2: LED and sensor init read the
+ * wiring tables, so a profile chosen later would come too late to matter.
  */
 
 #ifndef STARTUP_CONTROLLER_H
@@ -30,11 +34,14 @@ public:
 
     /**
      * @brief Run full startup sequence (blocks until HARDWARE INITIALISED is sent)
-     * 
-     * 1. Initializes LEDs and plays a visual-confirmation sweep
-     * 2. Initializes touch sensors with retries, builds status message
-     * 3. Enters handshake loop broadcasting status every 3s until ACK received
-     * 4. Sends firmware INFO followed by "HARDWARE INITIALISED" and returns
+     *
+     * 1. Announces INFO (firmware, protocol, available profiles) and waits up
+     *    to BOARD_VERSION_TIMEOUT_MS for the Pi's BOARD_VERSION; falls back to
+     *    the default profile on timeout or an unknown slug
+     * 2. Initializes LEDs and plays a visual-confirmation sweep
+     * 3. Initializes touch sensors with retries, builds status message
+     * 4. Enters handshake loop broadcasting status every 3s until ACK received
+     * 5. Sends the resolved INFO followed by "HARDWARE INITIALISED" and returns
      */
     void run();
 
@@ -43,17 +50,28 @@ private:
     TouchController& m_touchController;
     Stream& m_serial;
 
-    // Single status message (e.g. "SENSORS READY" or "SENSORS FAILED [A,B]")
-    char m_statusMsg[64];
+    // Single status message (e.g. "SENSORS READY" or "SENSORS FAILED [H01,H02]")
+    //
+    // Sized to hold the full active-input list: at 64 bytes the list was
+    // silently truncated as soon as a single CAP1188 chip failed (27 active
+    // inputs already need 124 characters), and the Pi derives the failed set
+    // from exactly this list.
+    char m_statusMsg[SENSOR_LIST_BUFFER_SIZE + 32];
 
-    // Step 1: LED init + sweep animation
+    // Step 1: profile negotiation
+    void sendInfo(bool withSelection);
+    void awaitBoardVersion();
+    // Activate `slug`, answering ACK BOARD_VERSION or ERR unknown_board_version.
+    void applyBoardVersion(const char* slug);
+
+    // Step 2: LED init + sweep animation
     void initLeds();
     void runLedSweepAnimation();
 
-    // Step 2: Sensor init with retries
+    // Step 3: Sensor init with retries
     void initSensors();
 
-    // Step 3: Handshake loop
+    // Step 4: Handshake loop
     void handshakeLoop();
     bool isAckMatch(const char* line) const;
 
