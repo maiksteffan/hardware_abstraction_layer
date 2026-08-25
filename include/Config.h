@@ -27,8 +27,8 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.0.5"
-#define PROTOCOL_VERSION "3"   // v3 = H01..H34 position tokens (3-char)
+#define FIRMWARE_VERSION "1.1.0"
+#define PROTOCOL_VERSION "3"   // v3 = H01..H35 position tokens (3-char)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
 #endif
@@ -108,11 +108,11 @@ constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY comma
 constexpr uint8_t EVENTS_PER_FLUSH = QUEUE_SIZE_EVENTS;
 
 // Serial output buffer
-// Must fit "SCANNED [H01,H02,...,H34] #4294967295\n" = ~156 chars worst case.
+// Must fit "SCANNED [H01,H02,...,H35] #4294967295\n" = ~162 chars worst case.
 constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 224;  // Max chars per event message
 
 // Sensor list buffer (for SCANNED response)
-// Holds up to INPUT_COUNT (34) tokens of 3 chars + commas + brackets/null.
+// Holds up to INPUT_COUNT (35) tokens of 3 chars + commas + brackets/null.
 constexpr size_t SENSOR_LIST_BUFFER_SIZE = 160;
 
 // Serial wait timeout (milliseconds)
@@ -131,7 +131,7 @@ constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
 constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
 //FUER FINNI:
 //constexpr uint8_t INPUT_COUNT = 5; 
-constexpr uint8_t INPUT_COUNT = 34;                  // Total logical inputs H01..H34
+constexpr uint8_t INPUT_COUNT = 35;                  // Total logical inputs H01..H35
 
 // Length of a position string including null terminator (e.g. "H01\0")
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
@@ -218,7 +218,7 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 // ============================================================================
 
 // Strip configuration
-constexpr uint8_t LED_POSITION_COUNT = 34;  // Logical positions (H01..H34)
+constexpr uint8_t LED_POSITION_COUNT = 35;  // Logical positions (H01..H35)
 
 // Number of physical LEDs lit per logical position (must be ODD: a center
 // LED plus an equal number of neighbors on each side). SHOW/SUCCESS/BLINK/...
@@ -258,13 +258,13 @@ constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
 // ============================================================================
 
 // State: SHOW (default active state)
-constexpr uint8_t COLOR_SHOW_R = 80;
+constexpr uint8_t COLOR_SHOW_R = 255;
 constexpr uint8_t COLOR_SHOW_G = 0;
-constexpr uint8_t COLOR_SHOW_B = 205;    // dark Purple
+constexpr uint8_t COLOR_SHOW_B = 0;    // dark Purple
 
 // State: SUCCESS (correct action)
-constexpr uint8_t COLOR_SUCCESS_R = 0;
-constexpr uint8_t COLOR_SUCCESS_G = 255;  // Green
+constexpr uint8_t COLOR_SUCCESS_R = 255;
+constexpr uint8_t COLOR_SUCCESS_G = 0;  // Green
 constexpr uint8_t COLOR_SUCCESS_B = 0;
 
 // State: BLINK (waiting for release)
@@ -335,7 +335,7 @@ constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
 };
 
 // ============================================================================
-// 10b. INPUT MAPPING: H01..H34  ->  (sensor_index, channel)
+// 10b. INPUT MAPPING: H01..H35  ->  (sensor_index, channel)
 // ============================================================================
 // sensor_index: 0..TOUCH_SENSOR_COUNT-1 (index into SENSOR_I2C_ADDRESSES)
 // channel:      0..TOUCH_CHANNELS_PER_SENSOR-1 (CAP1188 CS1..CS7)
@@ -349,19 +349,20 @@ struct InputMapping {
     uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1
 };
 
-
+//H03,H05,H10 are not working 
 constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
-    // H01..H07  -> sensor 0, channels 0..6
-    {1,3}, {1,5}, {1,6}, {2,1}, {2,6}, {3,1}, {3,5},
-    // H08..H14  -> sensor 1, channels 0..6
-    {1,0}, {1,2}, {1,4}, {2,0}, {2,3}, {3,0}, {3,3},
-    // H15..H21  -> sensor 2, channels 0..6
-    {3,6}, {1,1}, {0,3}, {2,2}, {2,5}, {4,2}, {3,2},
-    // H22..H28  -> sensor 3, channels 0..6
-    {3,4}, {0,6}, {0,4}, {0,5}, {4,5}, {4,6}, {4,4},
-    // H29..H34  -> sensor 4, channels 0..5 (channel 6 of sensor 4 is unused)
-    {0,0}, {0,2}, {0,1}, {4,0}, {4,1}, {4,3}
-    // TODO (user): edit this default layout to match the real wiring.
+    // 35-hold layout ("Holds D&E Mapping - R&D MVP BID-0RD").
+    // All 5 sensors x 7 channels are in use.
+    // H01..H07
+    {3,4}, {3,0}, {2,5}, {2,2}, {2,1}, {1,6}, {1,4},
+    // H08..H14
+    {3,6}, {3,2}, {2,6}, {2,0}, {1,3}, {1,5}, {3,5},
+    // H15..H21
+    {3,1}, {3,3}, {2,4}, {2,3}, {1,2}, {1,1}, {1,0},
+    // H22..H28
+    {4,1}, {4,2}, {4,4}, {4,6}, {0,1}, {0,2}, {0,5},
+    // H29..H35
+    {0,6}, {4,0}, {4,3}, {4,5}, {0,0}, {0,3}, {0,4}
 };
 
 

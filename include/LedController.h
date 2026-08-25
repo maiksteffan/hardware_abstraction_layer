@@ -2,7 +2,7 @@
  * @file LedController.h
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages LED_POSITION_COUNT (34) logical LED positions (H01-H34) mapped to two physical LED strips.
+ * Manages LED_POSITION_COUNT (35) logical LED positions (H01-H35) mapped to two physical LED strips.
  * Supports SHOW, HIDE, SUCCESS, BLINK, STOP_BLINK, and SEQUENCE_COMPLETED.
  */
 

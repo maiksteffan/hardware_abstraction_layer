@@ -17,7 +17,7 @@
 
 The **Sequenzboard** is an interactive climbing training board:
 
-- A climbing wall with **34 holds** (`H01`–`H34`), each touch-sensitive
+- A climbing wall with **35 holds** (`H01`–`H35`), each touch-sensitive
   (capacitive) and illuminated by addressable LEDs.
 - A **Raspberry Pi 5** runs the kiosk app (touchscreen UI + game logic).
 - An **ESP32-S3** (this repository) is the **hardware executor**: it drives
@@ -46,8 +46,8 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.0.5` |
-| `PROTOCOL_VERSION` | `3` (H01..H34 3-char position tokens) |
+| `FIRMWARE_VERSION` | `1.1.0` |
+| `PROTOCOL_VERSION` | `3` (H01..H35 3-char position tokens) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
 ---
@@ -60,14 +60,17 @@ Current versions ([include/Config.h](include/Config.h)):
 |---|---|
 | MCU | ESP32-S3-DevKitC-1-N8R8 (8 MB flash, 8 MB PSRAM), serial over native USB-CDC |
 | LED strips | 2× WS2812/NeoPixel, 260 LEDs each, data on GPIO 18 / GPIO 17 |
-| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, 7 channels used per chip |
+| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, all 7 channels used per chip (5×7 = 35) |
 | Legacy board | classic ESP32 WROOM still buildable via `pio run -e esp32dev` (pins overridden by build flags) |
 
-The wiring table `INPUT_MAPPINGS[34] = {sensorIndex, channel}` in
-[include/Config.h](include/Config.h) maps each logical hold `H01`–`H34` to a
-physical chip+channel. `LED_MAPPINGS[]` / `LED_MIRRORS[]` in
+The wiring table `INPUT_MAPPINGS[35] = {sensorIndex, channel}` in
+[include/Config.h](include/Config.h) maps each logical hold `H01`–`H35` to a
+physical chip+channel (layout "Holds D&E Mapping - R&D MVP BID-0RD").
+`LED_MAPPINGS[]` / `LED_MIRRORS[]` in
 [src/LedController.cpp](src/LedController.cpp) map each hold to strip
 positions (a mirror = second LED block for the same hold on the other strip).
+⚠ `LED_MAPPINGS` entry for `H35` is currently a placeholder (`STRIP1, 0`);
+the full LED table for the new 35-hold layout is still pending.
 
 ## 2.2 Dual-core FreeRTOS architecture
 
@@ -122,7 +125,7 @@ Runs on Core 0 every 5 ms:
 
 1. Read each active CAP1188's status register **once** per cycle (cached in
    `PhysicalSensor::lastStatus`) — never per-input reads.
-2. Update the 34 logical inputs via `INPUT_MAPPINGS`.
+2. Update the 35 logical inputs via `INPUT_MAPPINGS`.
 3. Clear the INT bit on chips that reported a touch (keeps latching alive).
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
@@ -192,7 +195,7 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 
 - 115200 baud, ASCII, line-based, `\n` terminated (`\r` tolerated on RX).
 - Max command line: `SERIAL_LINE_MAX_LENGTH` = 64 chars.
-- Positions: 3-char tokens `H01`–`H34` (case-insensitive RX, uppercase TX).
+- Positions: 3-char tokens `H01`–`H35` (case-insensitive RX, uppercase TX).
 - Grammar: `<ACTION> [<args>] [#<id>]`. `#<id>` is a 32-bit correlation id
   chosen by the Pi; the firmware **echoes the same id** on every
   `ACK`/`DONE`/`ERR`/`BUSY`/event answering that command. Commands without
@@ -243,7 +246,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.0.5 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 
 ## 3.3 Responses & events (ESP32 → Pi)
@@ -430,7 +433,7 @@ app) as the release asset.
 - Fixed-size arrays sized by Config constants; guard every index
   (`if (i >= INPUT_COUNT) return;`).
 - Explicit `uint8_t`/`uint16_t`/`uint32_t`. Positions are input indices
-  `0..33` internally, `"H01".."H34"` strings on the wire — convert only via
+  `0..34` internally, `"H01".."H35"` strings on the wire — convert only via
   `CommandController::parsePosition()` / `indexToPosition()`.
 
 ## 6.2 Concurrency
@@ -499,6 +502,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.1.0 | New 35-hold board layout: `INPUT_COUNT`/`LED_POSITION_COUNT` 34 → 35, new `INPUT_MAPPINGS` per "Holds D&E Mapping - R&D MVP BID-0RD" (all 5×7 channels used), positions extended to `H35`. `LED_MAPPINGS` for H35 is a placeholder pending the new LED table |
 | 1.0.5 | Startup now emits an unsolicited `INFO` line before `HARDWARE INITIALISED`; SHOW color tuned to dark purple (80,0,205) |
 | 1.0.4 | `pressConsumed` single-consumption rule fixes false double touches on re-armed `EXPECT`; SHOW color changed blue → purple |
 | 1.0.3 | Prior baseline (S3 board support, EXPECT_ANY qualification, hands-off detection, DIAG boot output) |

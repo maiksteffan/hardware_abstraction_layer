@@ -3,8 +3,8 @@
  * @brief Touch input controller for CAP1188 capacitive sensors over I2C
  *
  * Hardware: TOUCH_SENSOR_COUNT physical CAP1188 chips, each exposing up to
- * TOUCH_CHANNELS_PER_SENSOR channels. The firmware exposes INPUT_COUNT (34)
- * logical inputs named H01..H34 via the INPUT_MAPPINGS[] table in Config.h.
+ * TOUCH_CHANNELS_PER_SENSOR channels. The firmware exposes INPUT_COUNT (35)
+ * logical inputs named H01..H35 via the INPUT_MAPPINGS[] table in Config.h.
  *
  * Protocol v2: Event-driven architecture
  * - Always polls sensors
@@ -33,7 +33,7 @@ struct PhysicalSensor {
     bool statusValid;     // Whether lastStatus holds a fresh value
 };
 
-// State for one logical input (H01..H34)
+// State for one logical input (H01..H35)
 struct TouchInputState {
     bool currentTouched;
     bool debouncedTouched;

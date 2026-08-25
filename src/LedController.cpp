@@ -2,60 +2,59 @@
  * @file LedController.cpp
  * @brief LED Controller for dual addressable LED strips
  * 
- * Manages LED_POSITION_COUNT (34) logical LED positions (H01-H34) mapped to two physical strips.
+ * Manages LED_POSITION_COUNT (35) logical LED positions (H01-H35) mapped to two physical strips.
  * All configurable values are defined in Config.h.
  */
 
 #include "LedController.h"
 
 // ============================================================================
-// LED Position Mappings (H01-H34 mapped to physical LED indices)
+// LED Position Mappings (H01-H35 mapped to physical LED indices)
 // ============================================================================
 // Each position maps to a strip (1 or 2) and an index on that strip.
 //
-// TODO (user): set the correct {strip, ledIndex} for each input H01..H34 to
+// TODO (user): set the correct {strip, ledIndex} for each input H01..H35 to
 // match the real wiring. Placeholder values below all point to LED 0 of
 // strip 1; the firmware will compile and run but every input will light up
 // the same physical LED until you fill in the real layout.
 // ============================================================================
 
 static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
-    { StripId::STRIP2, 216 },  //H01
-    { StripId::STRIP2, 204 },  //H02 
-    { StripId::STRIP2, 193 },  //H03 
-    { StripId::STRIP2, 184 },  //H04
-    // { StripId::STRIP1, 184 },  //H04(2)
-    { StripId::STRIP1, 193 },   //H05
-    { StripId::STRIP1, 204 },  //H06
-    { StripId::STRIP1, 216 },  //H07
-    { StripId::STRIP2, 141 },  //H08  
-    { StripId::STRIP2, 152 },   //H09
-    { StripId::STRIP2, 164 },  //H10
-    { StripId::STRIP2, 172 },  //H11
-    { StripId::STRIP1, 171 },   //H12
-    { StripId::STRIP1, 163 },   //H13
-    { StripId::STRIP1, 152 },   //H14
-    { StripId::STRIP1, 141 },   //H15
-    { StripId::STRIP2, 122 },  //H16
-    { StripId::STRIP2, 110 }, //H17
-    { StripId::STRIP2, 100 },  //H18
-    { StripId::STRIP2, 90 },   //H19
-    //{ StripId::STRIP1, 90 },   //H19 (2)
-    { StripId::STRIP1, 99 },  //H20
-    { StripId::STRIP1, 111 }, //H21
-    { StripId::STRIP1, 122 }, //H22
-    { StripId::STRIP2, 49 },  //H23
-    { StripId::STRIP2, 60 },  //H24
-    { StripId::STRIP2, 72 },  //H25
-    { StripId::STRIP1, 72 },  //H26
-    { StripId::STRIP1, 60 },  //H27
-    { StripId::STRIP1, 49 },  //H28
-    { StripId::STRIP2, 30 },  //H29 
-    { StripId::STRIP2, 18 },  //H30
-    { StripId::STRIP2, 7 },  //H31
-    { StripId::STRIP1, 7 },   //H32
-    { StripId::STRIP1, 18 },   //H33
-    { StripId::STRIP1, 30 },    //H34
+    { StripId::STRIP1, 225 },  //H01
+    { StripId::STRIP1, 213 },  //H02 
+    { StripId::STRIP1, 201 },  //H03 
+    { StripId::STRIP1, 190 },  //H04
+    { StripId::STRIP2, 206 },   //H05
+    { StripId::STRIP2, 218 },  //H06
+    { StripId::STRIP2, 230 },  //H07
+    { StripId::STRIP1, 154 },  //H08  
+    { StripId::STRIP1, 165 },   //H09 
+    { StripId::STRIP1, 175 },  //H10
+    { StripId::STRIP2, 180 },  //H11
+    { StripId::STRIP2, 170 },   //H12
+    { StripId::STRIP2, 159 },   //H13
+    { StripId::STRIP1, 129 },   //H14
+    { StripId::STRIP1, 119 },   //H15
+    { StripId::STRIP1, 109 },  //H16
+    { StripId::STRIP1, 99 }, //H17
+    { StripId::STRIP2, 104 },  //H18
+    { StripId::STRIP2,  114},   //H19
+    { StripId::STRIP2, 124},  //H20
+    { StripId::STRIP2, 134 }, //H21
+    { StripId::STRIP1, 54 }, //H22
+    { StripId::STRIP1, 63 },  //H23
+    { StripId::STRIP1, 72 },  //H24
+    { StripId::STRIP1, 81 },  //H25 
+    { StripId::STRIP2, 86 },  //H26
+    { StripId::STRIP2, 77 },  //H27
+    { StripId::STRIP2, 68 },  //H28
+    { StripId::STRIP2, 59 },  //H29 
+    { StripId::STRIP1, 32 },  //H30
+    { StripId::STRIP1, 21 },  //H31
+    { StripId::STRIP1, 10},   //H32
+    { StripId::STRIP2, 15},   //H33
+    { StripId::STRIP2, 26},    //H34
+    { StripId::STRIP2, 37},    //H35
 };
 
 // ============================================================================
@@ -68,8 +67,8 @@ static const LedMapping LED_MAPPINGS[LED_POSITION_COUNT] = {
 // ============================================================================
 
 static const LedMirror LED_MIRRORS[] = {
-    { 3,  StripId::STRIP1, 184 },  // H04 -> mirror on strip 1
-    { 18, StripId::STRIP1, 90  },  // H19 -> mirror on strip 1
+    { 3,  StripId::STRIP2, 195 },  // H04 -> mirror on strip 2
+   // { 18, StripId::STRIP1, 90  },  // H19 -> mirror on strip 1
 };
 
 static constexpr uint8_t LED_MIRROR_COUNT = sizeof(LED_MIRRORS) / sizeof(LED_MIRRORS[0]);

@@ -4,7 +4,7 @@
  *
  * Indexing model:
  *   - "sensor index" (0..TOUCH_SENSOR_COUNT-1) addresses one physical CAP1188 chip.
- *   - "input index"  (0..INPUT_COUNT-1)        addresses one logical H01..H34 input.
+ *   - "input index"  (0..INPUT_COUNT-1)        addresses one logical H01..H35 input.
  *   - INPUT_MAPPINGS[i] = {sensorIndex, channel} resolves input i to hardware.
  *
  * Public API methods take input indices (NOT sensor indices).

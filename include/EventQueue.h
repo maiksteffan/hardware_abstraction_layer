@@ -43,7 +43,7 @@ struct Event {
     char position[POSITION_STRING_LENGTH];  // e.g. "H01\0"; empty string means "no position"
     uint32_t commandId;
     // Holds SCANNED list / ERR reason / VALUE delta. Must fit the full
-    // 34-token active-sensor list "H01,H02,...,H34" = 135 chars + null.
+    // 35-token active-sensor list "H01,H02,...,H35" = 139 chars + null.
     char extra[160];
     bool valid;
 };
