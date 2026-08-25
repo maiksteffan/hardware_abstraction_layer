@@ -19,7 +19,10 @@
 #ifndef BOARD_PROFILE_H
 #define BOARD_PROFILE_H
 
-#include <Arduino.h>
+// Deliberately not <Arduino.h>: a profile is pure wiring data with no
+// hardware dependency, which is what lets it be tested on the host.
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 // ============================================================================
