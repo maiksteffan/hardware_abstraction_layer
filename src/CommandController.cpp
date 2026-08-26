@@ -555,7 +555,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::SCAN:
             if (m_touchController) {
-                // Must be large enough for all 34 inputs: "H01,H02,...,H34" = 135 chars + null.
+                // Sized from MAX_HOLDS, so it fits any profile's full sensor list.
                 char sensorList[SENSOR_LIST_BUFFER_SIZE];
                 m_touchController->buildActiveSensorList(sensorList, sizeof(sensorList));
                 m_eventQueue.queueScanned(sensorList, cmdId);

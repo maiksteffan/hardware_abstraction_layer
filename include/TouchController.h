@@ -33,7 +33,7 @@ struct PhysicalSensor {
     bool statusValid;     // Whether lastStatus holds a fresh value
 };
 
-// State for one logical input (H01..H34)
+// State for one logical input (H01..H{holdCount})
 struct TouchInputState {
     bool currentTouched;
     bool debouncedTouched;
