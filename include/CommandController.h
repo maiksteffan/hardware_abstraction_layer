@@ -91,14 +91,14 @@ enum class CommandAction : uint8_t {
 struct ParsedCommand {
     CommandAction action;
     bool hasPosition;
-    char position[POSITION_STRING_LENGTH];  // canonical "H01".."H35\0" (empty if !hasPosition)
-    uint8_t positionIndex;                  // 0..INPUT_COUNT-1 (255 = invalid)
+    char position[POSITION_STRING_LENGTH];  // canonical "H01".."H{holdCount}\0" (empty if !hasPosition)
+    uint8_t positionIndex;                  // 0..holdCount-1 (255 = invalid)
     bool hasId;
     uint32_t id;
     uint8_t extraValue;  // For commands that need an extra numeric parameter (e.g., sensitivity level)
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
-    uint64_t excludeMask; // EXPECT_ANY_EXCEPT: bit i set => input i is excluded
+    HoldMask excludeMask; // EXPECT_ANY_EXCEPT: bit i set => input i is excluded
     bool valid;
 };
 
@@ -168,9 +168,9 @@ private:
     static bool strcasecmpN(const char* a, const char* b, size_t len);
 
 public:
-    // Position string helpers (canonical form: "H01".."H35")
-    // parsePosition() accepts 'H'/'h' + 2 digits, value 1..INPUT_COUNT.
-    // Returns input index (0..INPUT_COUNT-1) on success, 255 on failure.
+    // Position string helpers (canonical form: "H01".."H{holdCount}")
+    // parsePosition() accepts 'H'/'h' + 2 digits, value 1..holdCount.
+    // Returns input index (0..holdCount-1) on success, 255 on failure.
     // outStr (size POSITION_STRING_LENGTH) is written with the canonical upper-case form on success.
     static uint8_t parsePosition(const char* token, size_t tokenLen, char outStr[POSITION_STRING_LENGTH]);
     static void indexToPosition(uint8_t index, char outStr[POSITION_STRING_LENGTH]);

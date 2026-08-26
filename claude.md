@@ -17,7 +17,7 @@
 
 The **Sequenzboard** is an interactive climbing training board:
 
-- A climbing wall with **35 holds** (`H01`–`H35`), each touch-sensitive
+- A climbing wall with **34 holds** (`H01`–`H34`), each touch-sensitive
   (capacitive) and illuminated by addressable LEDs.
 - A **Raspberry Pi 5** runs the kiosk app (touchscreen UI + game logic).
 - An **ESP32-S3** (this repository) is the **hardware executor**: it drives
@@ -46,8 +46,8 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.1.0` |
-| `PROTOCOL_VERSION` | `3` (H01..H35 3-char position tokens) |
+| `FIRMWARE_VERSION` | `1.0.5` |
+| `PROTOCOL_VERSION` | `3` (H01..H34 3-char position tokens) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
 ---
@@ -60,17 +60,31 @@ Current versions ([include/Config.h](include/Config.h)):
 |---|---|
 | MCU | ESP32-S3-DevKitC-1-N8R8 (8 MB flash, 8 MB PSRAM), serial over native USB-CDC |
 | LED strips | 2× WS2812/NeoPixel, 260 LEDs each, data on GPIO 18 / GPIO 17 |
-| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, all 7 channels used per chip (5×7 = 35) |
+| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, 7 channels used per chip |
 | Legacy board | classic ESP32 WROOM still buildable via `pio run -e esp32dev` (pins overridden by build flags) |
 
-The wiring table `INPUT_MAPPINGS[35] = {sensorIndex, channel}` in
-[include/Config.h](include/Config.h) maps each logical hold `H01`–`H35` to a
-physical chip+channel (layout "Holds D&E Mapping - R&D MVP BID-0RD").
-`LED_MAPPINGS[]` / `LED_MIRRORS[]` in
-[src/LedController.cpp](src/LedController.cpp) map each hold to strip
-positions (a mirror = second LED block for the same hold on the other strip).
-⚠ `LED_MAPPINGS` entry for `H35` is currently a placeholder (`STRIP1, 0`);
-the full LED table for the new 35-hold layout is still pending.
+### Board profiles
+
+One binary serves every physical board build. Everything that differs between
+builds — hold count, sensor count and I²C addresses, `inputMappings[]`
+(hold → chip+channel), `ledMappings[]` / `ledMirrors[]` (hold → strip position;
+a mirror = second LED block for the same hold on the other strip), LED width
+and strip lengths — lives in a `BoardProfile`.
+
+Profiles are declared in [src/BoardProfiles.cpp](src/BoardProfiles.cpp), the
+types and ceilings in [include/BoardProfile.h](include/BoardProfile.h). Read
+the active one with `activeBoardProfile()`; **never** hard-code a hold or
+sensor count. Per-hold arrays are sized `MAX_HOLDS` (99, the cap implied by the
+4-byte position token) and per-sensor arrays `MAX_SENSORS`, while every loop
+bound and range check uses the active profile's counts.
+
+Adding a board version = one entry in `PROFILES[]`. Rewiring an existing board
+is a **new slug**, not an edit: the Pi has no other way to tell two wirings of
+`v1` apart.
+
+The Pi names the profile during the startup handshake; until then the default
+profile is active. See `docs/Board_Version_Firmware_Profiles.md` in the
+Sequenzboard repo.
 
 ## 2.2 Dual-core FreeRTOS architecture
 
@@ -105,6 +119,8 @@ loop():                                        // Core 1
 
 ## 2.4 Startup sequence (blocks inside `setup()`)
 
+0. **`ESP32 BOOT`** banner, then **profile negotiation** — see below. Must come
+   before LED and sensor init, which read the per-profile wiring tables.
 1. **LED init** + white pixel sweep (visual boot confirmation).
 2. **Sensor init**, up to `SENSOR_INIT_MAX_RETRIES` (3) attempts.
 3. **Diagnostics on the wire** (Pi logs, ignores unknown keywords):
@@ -115,9 +131,30 @@ loop():                                        // Core 1
    `ACK SENSORS READY` / `ACK SENSORS FAILED`.
    ⚠ The list inside `SENSORS FAILED [...]` contains the **active** inputs;
    the Pi computes the failed set as the complement.
-5. Sends an unsolicited `INFO firmware=... protocol=... board=...` line
-   (boot metadata; the Pi also still queries `INFO` after connecting), then
-   `HARDWARE INITIALISED` → touch task is created, normal operation.
+5. Sends the resolved `INFO` line — now including `boardVersion=` / `holds=` —
+   then `HARDWARE INITIALISED` → touch task is created, normal operation.
+   (The Pi also still queries `INFO` after connecting.)
+
+### Profile negotiation (step 0)
+
+```
+ESP32 -> ESP32 BOOT
+ESP32 -> INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1
+Pi    -> BOARD_VERSION v1
+ESP32 -> ACK BOARD_VERSION v1 holds=34
+```
+
+- The Pi has up to `BOARD_VERSION_TIMEOUT_MS` (3 s) to answer. On timeout the
+  **default profile** stays active and boot continues — that is the normal path
+  for a dev flash with no Pi attached.
+- Unknown slug → `ERR unknown_board_version <slug> [<available>]`, the default
+  profile stays active, and the later `INFO` carries `requested=<slug>
+  mismatch=1`. The board boots wrong-but-diagnosable rather than not at all.
+- Any other line during the wait re-triggers the `INFO` banner, so a
+  late-connecting Pi can still drive the exchange.
+- `buildBoardInfoLine()` in [src/BoardProfiles.cpp](src/BoardProfiles.cpp) is the
+  single source of the `INFO` format — the banner and the `INFO` command
+  response must not drift, because the Pi parses both.
 
 ## 2.5 Touch pipeline (the tricky part — read before touching TouchController)
 
@@ -125,7 +162,7 @@ Runs on Core 0 every 5 ms:
 
 1. Read each active CAP1188's status register **once** per cycle (cached in
    `PhysicalSensor::lastStatus`) — never per-input reads.
-2. Update the 35 logical inputs via `INPUT_MAPPINGS`.
+2. Update the profile's logical inputs via `inputMappings`.
 3. Clear the INT bit on chips that reported a touch (keeps latching alive).
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
@@ -195,7 +232,7 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 
 - 115200 baud, ASCII, line-based, `\n` terminated (`\r` tolerated on RX).
 - Max command line: `SERIAL_LINE_MAX_LENGTH` = 64 chars.
-- Positions: 3-char tokens `H01`–`H35` (case-insensitive RX, uppercase TX).
+- Positions: 3-char tokens `H01`–`H34` (case-insensitive RX, uppercase TX).
 - Grammar: `<ACTION> [<args>] [#<id>]`. `#<id>` is a 32-bit correlation id
   chosen by the Pi; the firmware **echoes the same id** on every
   `ACK`/`DONE`/`ERR`/`BUSY`/event answering that command. Commands without
@@ -246,7 +283,8 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 [#id]` (also emitted once unsolicited at boot, before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 
 ## 3.3 Responses & events (ESP32 → Pi)
@@ -255,13 +293,13 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|
 | `ACK` | `ACK <ACTION> [<pos>] [#id]` |
 | `DONE` | `DONE <ACTION> [<pos>] [#id]` |
-| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed` |
+| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `unknown_board_version` (boot only) |
 | `BUSY` | `BUSY [#id]` (queue full — Pi retries) |
 | `TOUCHED` / `TOUCH_RELEASED` | `TOUCHED <pos> [#id]` |
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
-| `INFO` | `INFO firmware=X protocol=Y board=Z [#id]` |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
 | `DIAG ...` | boot diagnostics; Pi logs and ignores |
@@ -284,8 +322,12 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 - **Never change existing keywords, grammar, ordering or `#id` semantics.**
 - Bump `FIRMWARE_VERSION` (semver) on every released change; bump
   `PROTOCOL_VERSION` only when message syntax/semantics change.
-- New functionality = new keywords (additive), never repurposed ones.
+- New functionality = new keywords (additive), never repurposed ones. New
+  `INFO` fields are additive too: the Pi ignores keys it does not know, and
+  firmware older than 1.1.0 simply omits the profile keys.
 - The Pi pins `REQUIRED_FIRMWARE_VERSION` and verifies `INFO` after flashing.
+  This is being replaced by a profile-membership check — see
+  `docs/Board_Version_Firmware_Profiles.md` in the Sequenzboard repo.
 
 ---
 
@@ -427,14 +469,16 @@ app) as the release asset.
 - **No heap allocation after `setup()`.** No `new`/`malloc` in steady state,
   no `String` — fixed-size `char` buffers with `snprintf` and explicit
   null-termination.
-- ALL configuration lives in [include/Config.h](include/Config.h) as
-  `constexpr` (or `#define` with `#ifndef` guards where build-flag overrides
-  are needed). Never hard-code magic numbers in .cpp files.
-- Fixed-size arrays sized by Config constants; guard every index
-  (`if (i >= INPUT_COUNT) return;`).
+- Board-independent configuration lives in [include/Config.h](include/Config.h)
+  as `constexpr` (or `#define` with `#ifndef` guards where build-flag overrides
+  are needed); board-specific wiring lives in a `BoardProfile`. Never hard-code
+  magic numbers in .cpp files.
+- Fixed-size arrays sized by the `MAX_*` ceilings in
+  [include/BoardProfile.h](include/BoardProfile.h); guard every index against
+  the *active profile* (`if (i >= activeBoardProfile().holdCount) return;`).
 - Explicit `uint8_t`/`uint16_t`/`uint32_t`. Positions are input indices
-  `0..34` internally, `"H01".."H35"` strings on the wire — convert only via
-  `CommandController::parsePosition()` / `indexToPosition()`.
+  `0..holdCount-1` internally, `"H01".."H99"` strings on the wire — convert
+  only via `CommandController::parsePosition()` / `indexToPosition()`.
 
 ## 6.2 Concurrency
 
@@ -479,7 +523,8 @@ hardware_abstraction_layer/
 ├── claude.md                 # THIS FILE — update after every change
 ├── README.md                 # brief project overview
 ├── include/
-│   ├── Config.h              # ALL configuration: pins, timing, colors, INPUT_MAPPINGS
+│   ├── Config.h              # board-independent config: pins, timing, colors
+│   ├── BoardProfile.h        # per-board wiring types, ceilings, profile registry API
 │   ├── CommandController.h
 │   ├── EventQueue.h
 │   ├── LedController.h
@@ -487,6 +532,7 @@ hardware_abstraction_layer/
 │   └── TouchController.h
 ├── src/
 │   ├── main.cpp              # setup(), loop(), FreeRTOS task creation
+│   ├── BoardProfiles.cpp     # the board profiles this firmware ships
 │   ├── CommandController.cpp
 │   ├── EventQueue.cpp
 │   ├── LedController.cpp
@@ -502,7 +548,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
-| 1.1.0 | New 35-hold board layout: `INPUT_COUNT`/`LED_POSITION_COUNT` 34 → 35, new `INPUT_MAPPINGS` per "Holds D&E Mapping - R&D MVP BID-0RD" (all 5×7 channels used), positions extended to `H35`. `LED_MAPPINGS` for H35 is a placeholder pending the new LED table |
+| 1.1.0 | Board profiles: one binary serves several board builds. New `BOARD_VERSION <slug>` boot command, `INFO` gains `profiles=`/`default=`/`boardVersion=`/`holds=`/`requested=`/`mismatch=`, wiring tables moved from `Config.h` + `LedController.cpp` into `PROFILES[]`. `excludeMask` is now a `HoldMask` bitset (a `uint64_t` would have capped the board at 64 holds). Fixes `m_statusMsg` truncating the `SENSORS FAILED [...]` list at 64 bytes |
 | 1.0.5 | Startup now emits an unsolicited `INFO` line before `HARDWARE INITIALISED`; SHOW color tuned to dark purple (80,0,205) |
 | 1.0.4 | `pressConsumed` single-consumption rule fixes false double touches on re-armed `EXPECT`; SHOW color changed blue → purple |
 | 1.0.3 | Prior baseline (S3 board support, EXPECT_ANY qualification, hands-off detection, DIAG boot output) |

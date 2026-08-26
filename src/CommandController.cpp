@@ -144,7 +144,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.g = 0;
     cmd.b = 0;
     cmd.range = 0;
-    cmd.excludeMask = 0;
+    cmd.excludeMask.clear();
     cmd.valid = false;
     
     const char* p = skipWhitespace(line);
@@ -249,7 +249,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
                 m_eventQueue.queueError("unknown_position", COMMAND_ID_NONE);
                 return false;
             }
-            cmd.excludeMask |= ((uint64_t)1 << idx);
+            cmd.excludeMask.set(idx);
             p = skipWhitespace(tokEnd);
         }
     }
@@ -555,7 +555,7 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::SCAN:
             if (m_touchController) {
-                // Must be large enough for all 35 inputs: "H01,H02,...,H35" = 139 chars + null.
+                // Sized from MAX_HOLDS, so it fits any profile's full sensor list.
                 char sensorList[SENSOR_LIST_BUFFER_SIZE];
                 m_touchController->buildActiveSensorList(sensorList, sizeof(sensorList));
                 m_eventQueue.queueScanned(sensorList, cmdId);
@@ -742,7 +742,7 @@ uint8_t CommandController::parsePosition(const char* token, size_t tokenLen, cha
     if (d1 < '0' || d1 > '9') return 255;
     if (d2 < '0' || d2 > '9') return 255;
     uint8_t value = (uint8_t)((d1 - '0') * 10 + (d2 - '0'));
-    if (value < 1 || value > INPUT_COUNT) return 255;
+    if (value < 1 || value > activeBoardProfile().holdCount) return 255;
     outStr[0] = 'H';
     outStr[1] = d1;
     outStr[2] = d2;
@@ -751,7 +751,7 @@ uint8_t CommandController::parsePosition(const char* token, size_t tokenLen, cha
 }
 
 void CommandController::indexToPosition(uint8_t index, char outStr[POSITION_STRING_LENGTH]) {
-    if (index >= INPUT_COUNT) {
+    if (index >= activeBoardProfile().holdCount) {
         outStr[0] = '\0';
         return;
     }

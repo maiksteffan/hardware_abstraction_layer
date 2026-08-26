@@ -3,9 +3,12 @@
  * @brief Implementation of multi-channel CAP1188 touch input controller
  *
  * Indexing model:
- *   - "sensor index" (0..TOUCH_SENSOR_COUNT-1) addresses one physical CAP1188 chip.
- *   - "input index"  (0..INPUT_COUNT-1)        addresses one logical H01..H35 input.
- *   - INPUT_MAPPINGS[i] = {sensorIndex, channel} resolves input i to hardware.
+ *   - "sensor index" (0..sensorCount-1) addresses one physical CAP1188 chip.
+ *   - "input index"  (0..holdCount-1)   addresses one logical H01..H{holdCount} input.
+ *   - inputMappings[i] = {sensorIndex, channel} resolves input i to hardware.
+ *
+ * All three come from the active board profile, so the counts below are the
+ * array ceilings (MAX_SENSORS / MAX_HOLDS), not the wiring.
  *
  * Public API methods take input indices (NOT sensor indices).
  */
@@ -29,13 +32,15 @@ TouchController::TouchController()
     , m_handsOffDetectionEnabled(false)
     , m_lastAnyTouched(false)
 {
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    // Cleared to the ceiling rather than the profile: this runs before the Pi
+    // has named a profile, so every slot a later profile could use must be sane.
+    for (uint8_t s = 0; s < MAX_SENSORS; s++) {
         m_sensors[s].active = false;
         m_sensors[s].enableMask = 0;
         m_sensors[s].lastStatus = 0;
         m_sensors[s].statusValid = false;
     }
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+    for (uint8_t i = 0; i < MAX_HOLDS; i++) {
         m_inputs[i].currentTouched = false;
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
@@ -45,15 +50,15 @@ TouchController::TouchController()
 
         m_expectDown[i].active = false;
         m_expectDown[i].commandId = COMMAND_ID_NONE;
-        m_expectDown[i].excludeMask = 0;
+        m_expectDown[i].excludeMask.clear();
         m_expectUp[i].active = false;
         m_expectUp[i].commandId = COMMAND_ID_NONE;
-        m_expectUp[i].excludeMask = 0;
+        m_expectUp[i].excludeMask.clear();
     }
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
-        m_expectAnyQueue[i].excludeMask = 0;
+        m_expectAnyQueue[i].excludeMask.clear();
     }
     memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
@@ -74,26 +79,28 @@ bool TouchController::begin() {
     Wire.setClock(I2C_CLOCK_SPEED_HZ);
     delay(100);
 
+    const BoardProfile& profile = activeBoardProfile();
+
     // Reset sensor state
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < MAX_SENSORS; s++) {
         m_sensors[s].active = false;
         m_sensors[s].enableMask = 0;
         m_sensors[s].lastStatus = 0;
         m_sensors[s].statusValid = false;
     }
 
-    // Build per-sensor enable mask from INPUT_MAPPINGS
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
-        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
-        uint8_t ch = INPUT_MAPPINGS[i].channel;
-        if (s < TOUCH_SENSOR_COUNT && ch < 8) {
+    // Build per-sensor enable mask from the profile's input mappings
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t s = profile.inputMappings[i].sensorIndex;
+        uint8_t ch = profile.inputMappings[i].channel;
+        if (s < profile.sensorCount && ch < 8) {
             m_sensors[s].enableMask |= (uint8_t)(1 << ch);
         }
     }
 
     // Initialize each physical sensor
     m_activeSensorCount = 0;
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < profile.sensorCount; s++) {
         if (initSensor(s)) {
             m_sensors[s].active = true;
             m_activeSensorCount++;
@@ -102,7 +109,7 @@ bool TouchController::begin() {
     }
 
     // Reset input state
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+    for (uint8_t i = 0; i < MAX_HOLDS; i++) {
         m_inputs[i].currentTouched = false;
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
@@ -133,34 +140,36 @@ void TouchController::tick() {
 }
 
 bool TouchController::recalibrate(uint8_t inputIndex) {
-    if (inputIndex >= INPUT_COUNT) return false;
-    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
-    uint8_t ch = INPUT_MAPPINGS[inputIndex].channel;
-    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+    const BoardProfile& profile = activeBoardProfile();
+    if (inputIndex >= profile.holdCount) return false;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    uint8_t ch = profile.inputMappings[inputIndex].channel;
+    if (s >= profile.sensorCount || !m_sensors[s].active) return false;
 
-    return writeRegister(SENSOR_I2C_ADDRESSES[s],
+    return writeRegister(profile.sensorAddresses[s],
                          CAP1188_REG_CALIBRATION_ACTIVE,
                          (uint8_t)(1 << ch));
 }
 
 void TouchController::recalibrateAll() {
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < activeBoardProfile().sensorCount; s++) {
         if (!m_sensors[s].active) continue;
-        writeRegister(SENSOR_I2C_ADDRESSES[s],
+        writeRegister(activeBoardProfile().sensorAddresses[s],
                       CAP1188_REG_CALIBRATION_ACTIVE,
                       m_sensors[s].enableMask);
     }
 }
 
 bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
-    if (inputIndex >= INPUT_COUNT) return false;
+    const BoardProfile& profile = activeBoardProfile();
+    if (inputIndex >= profile.holdCount) return false;
     if (level > 7) return false;
-    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
-    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    if (s >= profile.sensorCount || !m_sensors[s].active) return false;
 
     // CAP1188 sensitivity is GLOBAL per chip (bits 6:4 of SENSITIVITY_CONTROL).
     // 0 = 128x (most sensitive), 7 = 1x (least sensitive).
-    uint8_t address = SENSOR_I2C_ADDRESSES[s];
+    uint8_t address = profile.sensorAddresses[s];
     uint8_t regValue;
     if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue)) {
         return false;
@@ -170,7 +179,7 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
 }
 
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
-    if (inputIndex >= INPUT_COUNT) return;
+    if (inputIndex >= activeBoardProfile().holdCount) return;
 
     // If the input is ALREADY held when the EXPECT arrives, there will never
     // be a press edge. Report TOUCHED immediately - but only if the grab is
@@ -197,7 +206,7 @@ void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
 }
 
 void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
-    if (inputIndex >= INPUT_COUNT) return;
+    if (inputIndex >= activeBoardProfile().holdCount) return;
 
     // Symmetric to setExpectDown: if the input is already released, there
     // will never be a release edge - report TOUCH_RELEASED immediately.
@@ -213,22 +222,24 @@ void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
 }
 
 void TouchController::clearExpectDown(uint8_t inputIndex) {
-    if (inputIndex >= INPUT_COUNT) return;
+    if (inputIndex >= activeBoardProfile().holdCount) return;
     m_expectDown[inputIndex].active = false;
     m_expectDown[inputIndex].commandId = COMMAND_ID_NONE;
 }
 
 void TouchController::clearExpectUp(uint8_t inputIndex) {
-    if (inputIndex >= INPUT_COUNT) return;
+    if (inputIndex >= activeBoardProfile().holdCount) return;
     m_expectUp[inputIndex].active = false;
     m_expectUp[inputIndex].commandId = COMMAND_ID_NONE;
 }
 
 void TouchController::setExpectAny(uint32_t commandId) {
-    setExpectAnyExcept(0, commandId);
+    HoldMask excludeNothing;
+    excludeNothing.clear();
+    setExpectAnyExcept(excludeNothing, commandId);
 }
 
-void TouchController::setExpectAnyExcept(uint64_t excludeMask, uint32_t commandId) {
+void TouchController::setExpectAnyExcept(const HoldMask& excludeMask, uint32_t commandId) {
     // Enqueue into circular buffer
     m_expectAnyQueue[m_expectAnyHead].active = true;
     m_expectAnyQueue[m_expectAnyHead].commandId = commandId;
@@ -245,7 +256,7 @@ void TouchController::clearExpectAny() {
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
-        m_expectAnyQueue[i].excludeMask = 0;
+        m_expectAnyQueue[i].excludeMask.clear();
     }
     m_expectAnyHead = 0;
     m_expectAnyTail = 0;
@@ -255,7 +266,7 @@ void TouchController::clearExpectAny() {
 }
 
 void TouchController::clearAllExpectations() {
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         m_expectDown[i].active = false;
         m_expectDown[i].commandId = COMMAND_ID_NONE;
         m_expectUp[i].active = false;
@@ -281,15 +292,16 @@ void TouchController::setHandsOffDetection(bool enabled, uint32_t commandId) {
 }
 
 void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) const {
+    const BoardProfile& profile = activeBoardProfile();
     if (bufferSize == 0) return;
 
     buffer[0] = '\0';
     size_t pos = 0;
     bool first = true;
 
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
-        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
-        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t s = profile.inputMappings[i].sensorIndex;
+        if (s >= profile.sensorCount || !m_sensors[s].active) continue;
 
         char tok[POSITION_STRING_LENGTH];
         CommandController::indexToPosition(i, tok);
@@ -308,15 +320,16 @@ void TouchController::buildActiveSensorList(char* buffer, size_t bufferSize) con
 }
 
 void TouchController::buildFailedInputList(char* buffer, size_t bufferSize) const {
+    const BoardProfile& profile = activeBoardProfile();
     if (bufferSize == 0) return;
 
     buffer[0] = '\0';
     size_t pos = 0;
     bool first = true;
 
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
-        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
-        if (s >= TOUCH_SENSOR_COUNT) continue;
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t s = profile.inputMappings[i].sensorIndex;
+        if (s >= profile.sensorCount) continue;
         if (m_sensors[s].active) continue;  // only list inputs whose sensor FAILED
 
         char tok[POSITION_STRING_LENGTH];
@@ -335,14 +348,15 @@ void TouchController::buildFailedInputList(char* buffer, size_t bufferSize) cons
 }
 
 bool TouchController::isInputActive(uint8_t inputIndex) const {
-    if (inputIndex >= INPUT_COUNT) return false;
-    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
-    if (s >= TOUCH_SENSOR_COUNT) return false;
+    const BoardProfile& profile = activeBoardProfile();
+    if (inputIndex >= profile.holdCount) return false;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    if (s >= profile.sensorCount) return false;
     return m_sensors[s].active;
 }
 
 bool TouchController::isTouched(uint8_t inputIndex) const {
-    if (inputIndex >= INPUT_COUNT) return false;
+    if (inputIndex >= activeBoardProfile().holdCount) return false;
     return m_inputs[inputIndex].debouncedTouched;
 }
 
@@ -351,13 +365,14 @@ uint8_t TouchController::getActiveSensorCount() const {
 }
 
 bool TouchController::readSensorValue(uint8_t inputIndex, int8_t& value) {
-    if (inputIndex >= INPUT_COUNT) return false;
-    uint8_t s = INPUT_MAPPINGS[inputIndex].sensorIndex;
-    uint8_t ch = INPUT_MAPPINGS[inputIndex].channel;
-    if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) return false;
+    const BoardProfile& profile = activeBoardProfile();
+    if (inputIndex >= profile.holdCount) return false;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    uint8_t ch = profile.inputMappings[inputIndex].channel;
+    if (s >= profile.sensorCount || !m_sensors[s].active) return false;
 
     uint8_t rawValue;
-    if (!readRegister(SENSOR_I2C_ADDRESSES[s],
+    if (!readRegister(profile.sensorAddresses[s],
                       (uint8_t)(CAP1188_REG_SENSOR_INPUT_DELTA_1 + ch),
                       rawValue)) {
         return false;
@@ -371,8 +386,9 @@ bool TouchController::readSensorValue(uint8_t inputIndex, int8_t& value) {
 // ============================================================================
 
 bool TouchController::initSensor(uint8_t sensorIndex) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) return false;
-    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+    const BoardProfile& profile = activeBoardProfile();
+    if (sensorIndex >= profile.sensorCount) return false;
+    uint8_t address = profile.sensorAddresses[sensorIndex];
 
     // NOTE: We deliberately do NOT do a bare address-only probe here.
     // Some CAP1188 board variants / level shifters don't ACK an empty
@@ -402,7 +418,7 @@ bool TouchController::initSensor(uint8_t sensorIndex) {
     sens = (uint8_t)((sens & 0x8F) | (CAP1188_DEFAULT_SENSITIVITY << 4));
     if (!writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
 
-    // Enable exactly the channels referenced by INPUT_MAPPINGS for this sensor.
+    // Enable exactly the channels referenced by profile.inputMappings for this sensor.
     uint8_t mask = m_sensors[sensorIndex].enableMask;
     if (mask == 0) {
         // No inputs mapped to this sensor - still considered "init succeeded".
@@ -441,11 +457,11 @@ uint8_t TouchController::scanI2CBus(char* buffer, size_t bufferSize) const {
 }
 
 bool TouchController::diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t diagSize) {
-    if (sensorIndex >= TOUCH_SENSOR_COUNT) {
+    if (sensorIndex >= activeBoardProfile().sensorCount) {
         if (diagSize) snprintf(outDiag, diagSize, "S? FAIL bad_index");
         return false;
     }
-    uint8_t address = SENSOR_I2C_ADDRESSES[sensorIndex];
+    uint8_t address = activeBoardProfile().sensorAddresses[sensorIndex];
 
     uint8_t prodId = 0;
     if (!readRegister(address, CAP1188_REG_PRODUCT_ID, prodId)) {
@@ -508,15 +524,16 @@ bool TouchController::writeRegister(uint8_t address, uint8_t reg, uint8_t value)
 }
 
 void TouchController::pollSensors() {
+    const BoardProfile& profile = activeBoardProfile();
     uint32_t now = millis();
 
     // Step 1: read each active sensor's status register once and cache it.
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < profile.sensorCount; s++) {
         m_sensors[s].statusValid = false;
         if (!m_sensors[s].active) continue;
 
         uint8_t status;
-        if (readRegister(SENSOR_I2C_ADDRESSES[s],
+        if (readRegister(profile.sensorAddresses[s],
                          CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
             m_sensors[s].lastStatus = status;
             m_sensors[s].statusValid = true;
@@ -524,10 +541,10 @@ void TouchController::pollSensors() {
     }
 
     // Step 2: update per-input "current" state from cached status registers.
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
-        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
-        uint8_t ch = INPUT_MAPPINGS[i].channel;
-        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t s = profile.inputMappings[i].sensorIndex;
+        uint8_t ch = profile.inputMappings[i].channel;
+        if (s >= profile.sensorCount || !m_sensors[s].active) continue;
         if (!m_sensors[s].statusValid) continue;  // I2C read failed this cycle
 
         bool touched = ((m_sensors[s].lastStatus >> ch) & 0x01) != 0;
@@ -544,24 +561,25 @@ void TouchController::pollSensors() {
 
     // Step 3: clear the INT bit on every sensor that reported any active channel,
     // so that future touches are detected.
-    for (uint8_t s = 0; s < TOUCH_SENSOR_COUNT; s++) {
+    for (uint8_t s = 0; s < profile.sensorCount; s++) {
         if (!m_sensors[s].active || !m_sensors[s].statusValid) continue;
         if (m_sensors[s].lastStatus == 0) continue;
 
         uint8_t mc;
-        if (readRegister(SENSOR_I2C_ADDRESSES[s], CAP1188_REG_MAIN_CONTROL, mc)) {
-            writeRegister(SENSOR_I2C_ADDRESSES[s],
+        if (readRegister(profile.sensorAddresses[s], CAP1188_REG_MAIN_CONTROL, mc)) {
+            writeRegister(profile.sensorAddresses[s],
                           CAP1188_REG_MAIN_CONTROL, (uint8_t)(mc & ~0x01));
         }
     }
 }
 
 void TouchController::processDebounce() {
+    const BoardProfile& profile = activeBoardProfile();
     uint32_t now = millis();
 
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
-        uint8_t s = INPUT_MAPPINGS[i].sensorIndex;
-        if (s >= TOUCH_SENSOR_COUNT || !m_sensors[s].active) continue;
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t s = profile.inputMappings[i].sensorIndex;
+        if (s >= profile.sensorCount || !m_sensors[s].active) continue;
 
         TouchInputState& input = m_inputs[i];
 
@@ -617,7 +635,7 @@ void TouchController::processDebounce() {
 }
 
 bool TouchController::anyInputTouched() const {
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         if (m_inputs[i].debouncedTouched) return true;
     }
     return false;
@@ -661,7 +679,7 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
 
     ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
     if (!head.active || m_expectAnyUsed[inputIndex]) return;
-    if ((head.excludeMask >> inputIndex) & (uint64_t)1) return;  // EXPECT_ANY_EXCEPT
+    if (head.excludeMask.test(inputIndex)) return;  // EXPECT_ANY_EXCEPT
 
     char posStr[POSITION_STRING_LENGTH];
     CommandController::indexToPosition(inputIndex, posStr);
@@ -682,7 +700,7 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
 void TouchController::processExpectAnyQualification() {
     uint32_t now = millis();
 
-    for (uint8_t i = 0; i < INPUT_COUNT; i++) {
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         AnyCandidate& c = m_anyCandidates[i];
         if (!c.active) continue;
 

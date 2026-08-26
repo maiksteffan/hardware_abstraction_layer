@@ -2,9 +2,9 @@
  * @file TouchController.h
  * @brief Touch input controller for CAP1188 capacitive sensors over I2C
  *
- * Hardware: TOUCH_SENSOR_COUNT physical CAP1188 chips, each exposing up to
- * TOUCH_CHANNELS_PER_SENSOR channels. The firmware exposes INPUT_COUNT (35)
- * logical inputs named H01..H35 via the INPUT_MAPPINGS[] table in Config.h.
+ * Hardware: the active board profile's CAP1188 chips, each exposing up to
+ * TOUCH_CHANNELS_PER_SENSOR channels. The firmware exposes the profile's
+ * logical inputs H01..H{holdCount} via its inputMappings[] table.
  *
  * Protocol v2: Event-driven architecture
  * - Always polls sensors
@@ -33,7 +33,7 @@ struct PhysicalSensor {
     bool statusValid;     // Whether lastStatus holds a fresh value
 };
 
-// State for one logical input (H01..H35)
+// State for one logical input (H01..H{holdCount})
 struct TouchInputState {
     bool currentTouched;
     bool debouncedTouched;
@@ -47,7 +47,7 @@ struct TouchInputState {
 struct ExpectState {
     bool active;
     uint32_t commandId;
-    uint64_t excludeMask;  // EXPECT_ANY_EXCEPT only: bit i set => input i is excluded
+    HoldMask excludeMask;  // EXPECT_ANY_EXCEPT only: bit i set => input i is excluded
 };
 
 // Qualification state for one EXPECT_ANY touch candidate (brush-by filter).
@@ -74,7 +74,7 @@ public:
     bool begin();
     void tick();
     
-    // Recalibration (inputIndex = 0..INPUT_COUNT-1)
+    // Recalibration (inputIndex = 0..holdCount-1)
     bool recalibrate(uint8_t inputIndex);
     void recalibrateAll();
     
@@ -83,11 +83,11 @@ public:
     // physical sensor.
     bool setSensitivity(uint8_t inputIndex, uint8_t level);
     
-    // Expectations (indexed by input 0..INPUT_COUNT-1)
+    // Expectations (indexed by input 0..holdCount-1)
     void setExpectDown(uint8_t inputIndex, uint32_t commandId);
     void setExpectUp(uint8_t inputIndex, uint32_t commandId);
     void setExpectAny(uint32_t commandId);
-    void setExpectAnyExcept(uint64_t excludeMask, uint32_t commandId);
+    void setExpectAnyExcept(const HoldMask& excludeMask, uint32_t commandId);
     void clearExpectDown(uint8_t inputIndex);
     void clearExpectUp(uint8_t inputIndex);
     void clearExpectAny();
@@ -127,15 +127,17 @@ public:
 
 private:
     EventQueue* m_eventQueue;
-    PhysicalSensor m_sensors[TOUCH_SENSOR_COUNT];
-    TouchInputState m_inputs[INPUT_COUNT];
-    ExpectState m_expectDown[INPUT_COUNT];
-    ExpectState m_expectUp[INPUT_COUNT];
+    // Sized to the ceilings, not the active profile: the profile is only known
+    // at runtime. Loops and bounds checks use activeBoardProfile().
+    PhysicalSensor m_sensors[MAX_SENSORS];
+    TouchInputState m_inputs[MAX_HOLDS];
+    ExpectState m_expectDown[MAX_HOLDS];
+    ExpectState m_expectUp[MAX_HOLDS];
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
-    bool m_expectAnyUsed[INPUT_COUNT];  // Inputs already reported by EXPECT_ANY
-    AnyCandidate m_anyCandidates[INPUT_COUNT];        // EXPECT_ANY qualification state
+    bool m_expectAnyUsed[MAX_HOLDS];  // Inputs already reported by EXPECT_ANY
+    AnyCandidate m_anyCandidates[MAX_HOLDS];          // EXPECT_ANY qualification state
     uint32_t m_pressEdgeRing[EXPECT_ANY_EDGE_RING_SIZE];  // Recent press-edge timestamps
     uint8_t m_pressEdgeRingPos;
     uint32_t m_sweepHoldoffUntil;      // EXPECT_ANY decisions deferred until this time

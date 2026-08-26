@@ -23,12 +23,16 @@
 
 #include <Arduino.h>
 
+// Per-board-version wiring tables. Everything that differs between physical
+// board builds lives there; Config.h keeps only what is the same on every board.
+#include "BoardProfile.h"
+
 // ============================================================================
 // 1. FIRMWARE METADATA
 // ============================================================================
 
 #define FIRMWARE_VERSION "1.1.0"
-#define PROTOCOL_VERSION "3"   // v3 = H01..H35 position tokens (3-char)
+#define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
 #endif
@@ -107,16 +111,24 @@ constexpr uint8_t EXPECT_ANY_QUEUE_SIZE = 8;  // Max concurrent EXPECT_ANY comma
 // caused the Pi to time out waiting for SCANNED.
 constexpr uint8_t EVENTS_PER_FLUSH = QUEUE_SIZE_EVENTS;
 
-// Serial output buffer
-// Must fit "SCANNED [H01,H02,...,H35] #4294967295\n" = ~162 chars worst case.
-constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = 224;  // Max chars per event message
-
 // Sensor list buffer (for SCANNED response)
-// Holds up to INPUT_COUNT (35) tokens of 3 chars + commas + brackets/null.
-constexpr size_t SENSOR_LIST_BUFFER_SIZE = 160;
+// MAX_HOLDS tokens of 3 chars, separated by commas, plus the null terminator.
+constexpr size_t SENSOR_LIST_BUFFER_SIZE = MAX_HOLDS * 4 + 1;
+
+// Serial output buffer
+// Worst case is "SCANNED [<sensor list>] #4294967295\n" — the sensor list plus
+// brackets, the longest command id, and a little slack.
+constexpr size_t EVENT_MESSAGE_BUFFER_SIZE = SENSOR_LIST_BUFFER_SIZE + 64;
 
 // Serial wait timeout (milliseconds)
 constexpr uint16_t SERIAL_WAIT_TIMEOUT_MS = 3000;
+
+// How long the boot sequence waits for the Pi to name a board profile
+// (BOARD_VERSION) before falling back to the default profile. Only ever paid
+// in full when nothing answers — a dev flash with no Pi attached, or Pi
+// software old enough not to send it. A connected Pi replies within
+// milliseconds of the INFO banner.
+constexpr uint16_t BOARD_VERSION_TIMEOUT_MS = 3000;
 
 // Mutex timeout values (milliseconds)
 constexpr uint16_t MUTEX_TIMEOUT_QUEUE_MS  = 10;
@@ -127,13 +139,11 @@ constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 // 6. TOUCH SENSING
 // ============================================================================
 
-constexpr uint8_t TOUCH_SENSOR_COUNT = 5;            // Physical CAP1188 chips
+// Sensor and input counts are board-specific — see activeBoardProfile().
 constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 7;     // CS1..CS7 enabled (channels 0..6)
-//FUER FINNI:
-//constexpr uint8_t INPUT_COUNT = 5; 
-constexpr uint8_t INPUT_COUNT = 35;                  // Total logical inputs H01..H35
 
-// Length of a position string including null terminator (e.g. "H01\0")
+// Length of a position string including null terminator (e.g. "H01\0").
+// This is what caps a board at 99 holds; see MAX_HOLDS in BoardProfile.h.
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
 
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
@@ -217,21 +227,9 @@ constexpr uint8_t  SENSOR_INIT_MAX_RETRIES = 3;
 // 7. LED CONTROL
 // ============================================================================
 
-// Strip configuration
-constexpr uint8_t LED_POSITION_COUNT = 35;  // Logical positions (H01..H35)
-
-// Number of physical LEDs lit per logical position (must be ODD: a center
-// LED plus an equal number of neighbors on each side). SHOW/SUCCESS/BLINK/...
-// light this whole block; expansion animations grow outward from its edges.
-constexpr uint8_t LED_POSITION_WIDTH = 5;
-
-#ifndef LED_STRIP_1_LENGTH
-#define LED_STRIP_1_LENGTH 260
-#endif
-
-#ifndef LED_STRIP_2_LENGTH
-#define LED_STRIP_2_LENGTH 260
-#endif
+// Position count, per-position LED width and strip lengths are board-specific
+// — see activeBoardProfile(). SHOW/SUCCESS/BLINK/... light a whole position
+// block; expansion animations grow outward from its edges.
 
 constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 255;  // 0-255
 
@@ -258,13 +256,13 @@ constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
 // ============================================================================
 
 // State: SHOW (default active state)
-constexpr uint8_t COLOR_SHOW_R = 255;
+constexpr uint8_t COLOR_SHOW_R = 80;
 constexpr uint8_t COLOR_SHOW_G = 0;
-constexpr uint8_t COLOR_SHOW_B = 0;    // dark Purple
+constexpr uint8_t COLOR_SHOW_B = 205;    // dark Purple
 
 // State: SUCCESS (correct action)
-constexpr uint8_t COLOR_SUCCESS_R = 255;
-constexpr uint8_t COLOR_SUCCESS_G = 0;  // Green
+constexpr uint8_t COLOR_SUCCESS_R = 0;
+constexpr uint8_t COLOR_SUCCESS_G = 255;  // Green
 constexpr uint8_t COLOR_SUCCESS_B = 0;
 
 // State: BLINK (waiting for release)
@@ -325,46 +323,6 @@ constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
 constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 3;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
-
-// ============================================================================
-// 10. SENSOR I2C ADDRESSES (one per physical CAP1188 chip)
-// ============================================================================
-
-constexpr uint8_t SENSOR_I2C_ADDRESSES[TOUCH_SENSOR_COUNT] = {
-    0x28, 0x29, 0x2A, 0x2B, 0x2C
-};
-
-// ============================================================================
-// 10b. INPUT MAPPING: H01..H35  ->  (sensor_index, channel)
-// ============================================================================
-// sensor_index: 0..TOUCH_SENSOR_COUNT-1 (index into SENSOR_I2C_ADDRESSES)
-// channel:      0..TOUCH_CHANNELS_PER_SENSOR-1 (CAP1188 CS1..CS7)
-//
-// EDIT THIS TABLE TO MATCH YOUR PHYSICAL WIRING.
-// Entry i corresponds to input "H{i+1:02}" (so INPUT_MAPPINGS[0] is H01).
-// ============================================================================
-
-struct InputMapping {
-    uint8_t sensorIndex;   // 0..TOUCH_SENSOR_COUNT-1
-    uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1
-};
-
-//H03,H05,H10 are not working 
-constexpr InputMapping INPUT_MAPPINGS[INPUT_COUNT] = {
-    // 35-hold layout ("Holds D&E Mapping - R&D MVP BID-0RD").
-    // All 5 sensors x 7 channels are in use.
-    // H01..H07
-    {3,4}, {3,0}, {2,5}, {2,2}, {2,1}, {1,6}, {1,4},
-    // H08..H14
-    {3,6}, {3,2}, {2,6}, {2,0}, {1,3}, {1,5}, {3,5},
-    // H15..H21
-    {3,1}, {3,3}, {2,4}, {2,3}, {1,2}, {1,1}, {1,0},
-    // H22..H28
-    {4,1}, {4,2}, {4,4}, {4,6}, {0,1}, {0,2}, {0,5},
-    // H29..H35
-    {0,6}, {4,0}, {4,3}, {4,5}, {0,0}, {0,3}, {0,4}
-};
-
 
 // ============================================================================
 // 11. PROTOCOL CONSTANTS
