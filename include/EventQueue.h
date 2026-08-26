@@ -42,8 +42,10 @@ struct Event {
     char action[16];
     char position[POSITION_STRING_LENGTH];  // e.g. "H01\0"; empty string means "no position"
     uint32_t commandId;
-    // Holds SCANNED list / ERR reason / VALUE delta. Must fit the full
-    // 34-token active-sensor list "H01,H02,...,H34" = 135 chars + null.
+    // Holds SCANNED list / ERR reason / VALUE delta. The longest payload is the
+    // active-sensor list, 4 chars per hold ("H01," ...) minus the trailing
+    // comma, plus the null. 160 bytes covers any profile up to 39 holds; the
+    // largest profile this firmware ships has 35.
     char extra[160];
     bool valid;
 };
