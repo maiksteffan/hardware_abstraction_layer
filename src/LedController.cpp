@@ -41,6 +41,10 @@ LedController::LedController()
 
 void LedController::begin() {
     const BoardProfile& profile = activeBoardProfile();
+    // Pins before begin(): the constructor ran before any profile was chosen,
+    // so the strips are still pointed at the build's default GPIOs.
+    m_strip1.setPin(profile.ledPin1);
+    m_strip2.setPin(profile.ledPin2);
     m_strip1.updateLength(min(profile.strip1Length, MAX_LED_STRIP_LENGTH));
     m_strip2.updateLength(min(profile.strip2Length, MAX_LED_STRIP_LENGTH));
 

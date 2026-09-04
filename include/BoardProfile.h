@@ -114,6 +114,12 @@ struct BoardProfile {
 
     uint16_t strip1Length;
     uint16_t strip2Length;
+
+    /// GPIO each strip's data line is on. Board builds sharing an MCU do not
+    /// share their LED wiring — the bench board drives its single strip from
+    /// GPIO25 — so the pin cannot live in the per-MCU build flags.
+    uint8_t ledPin1;
+    uint8_t ledPin2;
 };
 
 // ============================================================================

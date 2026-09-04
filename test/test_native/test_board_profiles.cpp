@@ -94,6 +94,23 @@ void test_every_profile_is_internally_consistent() {
     }
 }
 
+void test_every_profile_drives_its_mappings_from_a_pin() {
+    // A mapping on a strip of length 0 lights nothing, and two strips sharing a
+    // pin means one of them silently overwrites the other. Both are wiring
+    // mistakes that only show up as "the LEDs do not work" on a real board.
+    for (uint8_t i = 0; i < boardProfileCount(); i++) {
+        const BoardProfile& profile = boardProfileAt(i);
+        TEST_ASSERT_NOT_EQUAL(profile.ledPin1, profile.ledPin2);
+
+        for (uint8_t hold = 0; hold < profile.holdCount; hold++) {
+            const LedMapping& led = profile.ledMappings[hold];
+            uint16_t length = (led.strip == StripId::STRIP1) ? profile.strip1Length
+                                                             : profile.strip2Length;
+            TEST_ASSERT_GREATER_THAN(0, length);
+        }
+    }
+}
+
 void test_every_mapping_points_at_hardware_the_profile_has() {
     for (uint8_t i = 0; i < boardProfileCount(); i++) {
         const BoardProfile& profile = boardProfileAt(i);
@@ -272,6 +289,7 @@ int main() {
     RUN_TEST(test_every_registered_profile_is_findable_by_its_slug);
     RUN_TEST(test_every_profile_is_internally_consistent);
     RUN_TEST(test_every_mapping_points_at_hardware_the_profile_has);
+    RUN_TEST(test_every_profile_drives_its_mappings_from_a_pin);
     RUN_TEST(test_no_two_holds_share_a_sensor_channel);
     RUN_TEST(test_slugs_are_unique);
 

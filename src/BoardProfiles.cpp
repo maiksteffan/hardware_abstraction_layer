@@ -195,17 +195,29 @@ static const InputMapping DEV5_INPUT_MAPPINGS[] = {
     {4,0},  // H05 = Hold E (0x3F)
 };
 
+// ---- LED data pin ----
+// The one strip on this board hangs on GPIO25, not on the GPIO18/19 pair the
+// production WROOM board uses — see sonthofen_firmware @ 324b8ef, which set it
+// back to 25 "to match hardware wiring". Driving 19 instead leaves the strip
+// dark, boot sweep included.
+//
+// WROOM-only: GPIO25 does not exist on the ESP32-S3, so this profile is not
+// meaningful in an S3 build. It describes a bench board that is a WROOM.
+static constexpr uint8_t DEV5_LED_PIN = 25;
+
 // ---- LED mapping: H01..H05 -> (strip, index) ----
-// STRIP1 is not connected on this board; everything sits on STRIP2.
+// Only one strip is connected, so it is STRIP1 and STRIP2 stays empty. The
+// source had these on STRIP2 because that was the pin its wiring used; with
+// the pin now part of the profile, the logical strip can be the first one.
 static const LedMapping DEV5_LED_MAPPINGS[] = {
-    { StripId::STRIP2, 39 },  //H01 (Hold D)
-    { StripId::STRIP2, 31 },  //H02 (Hold C)
-    { StripId::STRIP2, 23 },  //H03 (Hold B)
-    { StripId::STRIP2,  3 },  //H04 (Hold A)
-    { StripId::STRIP2, 59 },  //H05 (Hold E)
+    { StripId::STRIP1, 39 },  //H01 (Hold D)
+    { StripId::STRIP1, 31 },  //H02 (Hold C)
+    { StripId::STRIP1, 23 },  //H03 (Hold B)
+    { StripId::STRIP1,  3 },  //H04 (Hold A)
+    { StripId::STRIP1, 59 },  //H05 (Hold E)
 };
 
-// No mirrors: STRIP1 is not connected.
+// No mirrors: there is no second strip to mirror onto.
 
 // ============================================================================
 // Registry
@@ -226,6 +238,8 @@ static const BoardProfile PROFILES[] = {
         /* ledPositionWidth  */ 5,
         /* strip1Length      */ 260,
         /* strip2Length      */ 260,
+        /* ledPin1           */ PIN_LED_STRIP_1,
+        /* ledPin2           */ PIN_LED_STRIP_2,
     },
     {
         /* slug              */ "v2",
@@ -239,6 +253,8 @@ static const BoardProfile PROFILES[] = {
         /* ledPositionWidth  */ 5,
         /* strip1Length      */ 260,
         /* strip2Length      */ 260,
+        /* ledPin1           */ PIN_LED_STRIP_1,
+        /* ledPin2           */ PIN_LED_STRIP_2,
     },
     {
         /* slug              */ "dev-5hold",
@@ -254,7 +270,11 @@ static const BoardProfile PROFILES[] = {
         // would make neighbouring holds nearly touch.
         /* ledPositionWidth  */ 1,
         /* strip1Length      */ 64,
-        /* strip2Length      */ 64,
+        // Nothing on the second output: length 0 keeps the boot sweep and every
+        // animation off a strip that is not there.
+        /* strip2Length      */ 0,
+        /* ledPin1           */ DEV5_LED_PIN,
+        /* ledPin2           */ PIN_LED_STRIP_2,
     },
 };
 
