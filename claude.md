@@ -548,6 +548,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.1.1 | Release builds one merged binary per MCU: `firmware-merged.bin` (ESP32-S3) and `firmware-merged-esp32.bin` (classic ESP32 WROOM), each verified in CI against the `chip_id` in its image header. The `esp32dev` env now overrides the S3 pin defaults (I2C 21/22, LED 18/19) — GPIO 6/7 are SPI-flash pins on the WROOM, so the sensor scan came back empty |
 | 1.1.0 | Board profiles: one binary serves several board builds. New `BOARD_VERSION <slug>` boot command, `INFO` gains `profiles=`/`default=`/`boardVersion=`/`holds=`/`requested=`/`mismatch=`, wiring tables moved from `Config.h` + `LedController.cpp` into `PROFILES[]`. `excludeMask` is now a `HoldMask` bitset (a `uint64_t` would have capped the board at 64 holds). Fixes `m_statusMsg` truncating the `SENSORS FAILED [...]` list at 64 bytes |
 | 1.0.5 | Startup now emits an unsolicited `INFO` line before `HARDWARE INITIALISED`; SHOW color tuned to dark purple (80,0,205) |
 | 1.0.4 | `pressConsumed` single-consumption rule fixes false double touches on re-armed `EXPECT`; SHOW color changed blue → purple |

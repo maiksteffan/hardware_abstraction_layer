@@ -1,8 +1,16 @@
 name: Build & Release Firmware
 
-# Build the ESP32-S3 firmware and publish a merged, 0x0-flashable binary
-# whenever a semantic-version tag is pushed. The Raspberry Pi downloads the
-# `firmware-merged.bin` asset and flashes it over USB with esptool.
+# Build the firmware for every supported MCU and publish one merged,
+# 0x0-flashable binary per MCU whenever a semantic-version tag is pushed.
+#
+# One asset per MCU is not optional: an ESP32-S3 image carries chip_id 0x0009
+# in its header and puts the bootloader at 0x0, while the classic ESP32 uses
+# chip_id 0x0000 and 0x1000. esptool refuses to write the wrong one, so a
+# WROOM board cannot be flashed with the S3 asset.
+#
+# The Pi picks the asset matching the `board=` field the ESP32 reports in INFO.
+# `firmware-merged.bin` keeps its name and stays the S3 build so that older Pi
+# software, which knows only that one name, keeps working.
 
 on:
   push:
@@ -12,9 +20,6 @@ on:
 
 permissions:
   contents: write
-
-env:
-  PIO_ENV: esp32-s3-devkitc-1
 
 jobs:
   release:
@@ -42,14 +47,42 @@ jobs:
             exit 1
           fi
 
-      - name: Build firmware
-        run: pio run -e "$PIO_ENV"
+      - name: Build firmware (ESP32-S3)
+        run: pio run -e esp32-s3-devkitc-1
 
-      - name: Merge into a single flashable binary
-        run: python .github/scripts/merge_firmware.py ".pio/build/$PIO_ENV" firmware-merged.bin esp32s3
+      - name: Build firmware (ESP32 WROOM)
+        run: pio run -e esp32dev
+
+      - name: Merge ESP32-S3 build
+        run: python .github/scripts/merge_firmware.py .pio/build/esp32-s3-devkitc-1 firmware-merged.bin esp32s3
+
+      - name: Merge ESP32 WROOM build
+        run: python .github/scripts/merge_firmware.py .pio/build/esp32dev firmware-merged-esp32.bin esp32
+
+      - name: Verify each asset targets the MCU it claims
+        run: |
+          # Header layout: magic(1) ... chip_id at offset 12, little-endian.
+          # A swapped asset would flash-fail on the board, hours later and far
+          # from here, so it is cheaper to catch it in CI.
+          check() {
+            file="$1"; offset="$2"; want="$3"
+            magic=$(xxd -p -l1 -s "$offset" "$file")
+            if [ "$magic" != "e9" ]; then
+              echo "::error::$file: no ESP32 image magic at $offset (got 0x$magic)"; exit 1
+            fi
+            got=$(xxd -p -l2 -s $((offset + 12)) "$file" | sed 's/\(..\)\(..\)/0x\2\1/')
+            if [ "$got" != "$want" ]; then
+              echo "::error::$file: chip_id $got, expected $want"; exit 1
+            fi
+            echo "$file: chip_id $got OK"
+          }
+          check firmware-merged.bin       0    0x0009   # ESP32-S3, bootloader at 0x0
+          check firmware-merged-esp32.bin 4096 0x0000   # ESP32,    bootloader at 0x1000
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: firmware-merged.bin
+          files: |
+            firmware-merged.bin
+            firmware-merged-esp32.bin
           generate_release_notes: true
