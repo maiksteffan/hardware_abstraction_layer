@@ -46,8 +46,8 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.0.5` |
-| `PROTOCOL_VERSION` | `3` (H01..H34 3-char position tokens) |
+| `FIRMWARE_VERSION` | `1.1.3` |
+| `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
 ---
@@ -283,7 +283,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.1.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.1.3 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 
@@ -548,6 +548,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.1.3 | Default CAP1188 sensitivity changed 3 → 2 (`CAP1188_DEFAULT_SENSITIVITY`, more sensitive) |
 | 1.1.2 | LED data pins moved into the board profile (`ledPin1`/`ledPin2`). Two board builds on the same MCU do not share their LED wiring, so the pin could not stay in the per-MCU build flags: `dev-5hold` drives its single strip from GPIO25, and driving the WROOM default 19 left it dark, boot sweep included. That profile's holds now sit on STRIP1 — the strip that exists — with STRIP2 length 0 |
 | 1.1.1 | Release builds one merged binary per MCU: `firmware-merged.bin` (ESP32-S3) and `firmware-merged-esp32.bin` (classic ESP32 WROOM), each verified in CI against the `chip_id` in its image header. The `esp32dev` env now overrides the S3 pin defaults (I2C 21/22, LED 18/19) — GPIO 6/7 are SPI-flash pins on the WROOM, so the sensor scan came back empty |
 | 1.1.0 | Board profiles: one binary serves several board builds. New `BOARD_VERSION <slug>` boot command, `INFO` gains `profiles=`/`default=`/`boardVersion=`/`holds=`/`requested=`/`mismatch=`, wiring tables moved from `Config.h` + `LedController.cpp` into `PROFILES[]`. `excludeMask` is now a `HoldMask` bitset (a `uint64_t` would have capped the board at 64 holds). Fixes `m_statusMsg` truncating the `SENSORS FAILED [...]` list at 64 bytes |

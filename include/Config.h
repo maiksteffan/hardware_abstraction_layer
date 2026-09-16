@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.1.2"
+#define FIRMWARE_VERSION "1.1.3"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -281,9 +281,9 @@ constexpr uint8_t COLOR_OFF_G = 0;
 constexpr uint8_t COLOR_OFF_B = 0;
 
 // State: RECORD indicator (static dim white across all positions)
-constexpr uint8_t COLOR_RECORD_R = 30;    // Dim white
-constexpr uint8_t COLOR_RECORD_G = 30;
-constexpr uint8_t COLOR_RECORD_B = 30;
+constexpr uint8_t COLOR_RECORD_R = 5;    // Dim white
+constexpr uint8_t COLOR_RECORD_G = 50;
+constexpr uint8_t COLOR_RECORD_B = 50;
 
 // ============================================================================
 // 9. I2C CONFIGURATION
@@ -320,7 +320,7 @@ constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
 // Sensitivity level written to every chip at init (bits 6:4 of reg 0x1F).
 // 0 = most sensitive (128x) ... 7 = least sensitive (1x). Chip default is 2.
 // Can still be changed at runtime per chip via SET_SENSITIVITY.
-constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 3;
+constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 2;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 
