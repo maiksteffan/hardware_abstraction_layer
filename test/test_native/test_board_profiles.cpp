@@ -282,6 +282,10 @@ void test_a_zero_length_buffer_writes_nothing() {
 
 // ---------------------------------------------------------------------------
 
+// test_snake_track.cpp — built into the same binary, which is why this file
+// is the one that includes BoardProfiles.cpp.
+void runSnakeTrackTests();
+
 int main() {
     UNITY_BEGIN();
 
@@ -307,6 +311,8 @@ int main() {
     RUN_TEST(test_the_line_fits_the_event_buffer);
     RUN_TEST(test_a_short_buffer_truncates_instead_of_overflowing);
     RUN_TEST(test_a_zero_length_buffer_writes_nothing);
+
+    runSnakeTrackTests();
 
     return UNITY_END();
 }
