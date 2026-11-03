@@ -155,7 +155,7 @@ constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
 // window resets the timer (see TouchController::pollSensors()), so even
 // repeated short re-contacts keep the touch latched.
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 800;    // short release latch so quick hold-to-hold transitions are detected
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 50;    // short release latch so quick hold-to-hold transitions are detected
 
 // ----------------------------------------------------------------------------
 // 6b. EXPECT_ANY QUALIFICATION (brush-by rejection for climbing holds)
