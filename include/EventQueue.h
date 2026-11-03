@@ -80,6 +80,14 @@ public:
     bool queueValue(const char* position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
     bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE);
     bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE);
+    
+    // Synchronous output that bypasses the queue, for replies longer than the
+    // queue should carry (TRACK: one line per hold). Main loop only, and
+    // flush() first so replies queued earlier still arrive first. Blocks for
+    // as long as the UART needs to send the line.
+    void sendAckNow(const char* action, uint32_t commandId = COMMAND_ID_NONE);
+    void sendDoneNow(const char* action, uint32_t commandId = COMMAND_ID_NONE);
+    void writeLine(const char* line);
 
 private:
     Event m_events[QUEUE_SIZE_EVENTS];
@@ -92,6 +100,7 @@ private:
     
     bool enqueue(const Event& event);
     void sendEvent(const Event& event);
+    void writeRaw(const char* buffer, size_t length);
 };
 
 #endif // EVENT_QUEUE_H

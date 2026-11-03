@@ -10,6 +10,7 @@
 #include "LedController.h"
 #include "TouchController.h"
 #include "EventQueue.h"
+#include "SnakeTrack.h"
 
 // ============================================================================
 // Constructor
@@ -144,6 +145,8 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.g = 0;
     cmd.b = 0;
     cmd.range = 0;
+    cmd.snakeStart = 0;
+    cmd.snakeLength = 0;
     cmd.excludeMask.clear();
     cmd.valid = false;
     
@@ -212,6 +215,11 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         p = skipWhitespace(p);
         cmd.valid = true;
         return true;
+    }
+    
+    if (cmd.action == CommandAction::SNAKE && !parseSnakeParams(p, cmd)) {
+        m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
+        return false;
     }
     
     // Parse position (if applicable)
@@ -320,6 +328,9 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "CLEAN_QUEUE", len)) return CommandAction::CLEAN_QUEUE;
     if (strcasecmpN(str, "HANDSOFF_DETECTION_ON", len)) return CommandAction::HANDSOFF_DETECTION_ON;
     if (strcasecmpN(str, "HANDSOFF_DETECTION_OFF", len)) return CommandAction::HANDSOFF_DETECTION_OFF;
+    if (strcasecmpN(str, "TRACK", len)) return CommandAction::TRACK;
+    if (strcasecmpN(str, "SNAKE", len)) return CommandAction::SNAKE;
+    if (strcasecmpN(str, "SNAKE_OFF", len)) return CommandAction::SNAKE_OFF;
     return CommandAction::INVALID;
 }
 
@@ -353,6 +364,9 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::CLEAN_QUEUE: return "CLEAN_QUEUE";
         case CommandAction::HANDSOFF_DETECTION_ON: return "HANDSOFF_DETECTION_ON";
         case CommandAction::HANDSOFF_DETECTION_OFF: return "HANDSOFF_DETECTION_OFF";
+        case CommandAction::TRACK: return "TRACK";
+        case CommandAction::SNAKE: return "SNAKE";
+        case CommandAction::SNAKE_OFF: return "SNAKE_OFF";
         default: return "INVALID";
     }
 }
@@ -609,6 +623,20 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             }
             break;
             
+        case CommandAction::TRACK:
+            sendTrack(cmdId);
+            break;
+            
+        case CommandAction::SNAKE:
+            m_ledController.snake(cmd.snakeStart, cmd.snakeLength, cmd.r, cmd.g, cmd.b);
+            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
+        case CommandAction::SNAKE_OFF:
+            m_ledController.snakeOff();
+            m_eventQueue.queueAck(actionStr, 0, cmdId);
+            break;
+            
         case CommandAction::CLEAN_QUEUE:
             if (m_touchController) {
                 m_touchController->clearAllExpectations();
@@ -626,6 +654,35 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             m_eventQueue.queueError("unknown_action", cmdId);
             break;
     }
+}
+
+/**
+ * TRACK reply: ACK, header, one TRACK_HOLD line per hold, DONE.
+ *
+ * Too long for one event (EVENT_MESSAGE_BUFFER_SIZE) and, at 35 holds plus
+ * ACK/header/DONE, too much for the event queue to take reliably next to
+ * pending touch events — so it is written straight to serial. The queue is
+ * drained first, so replies to earlier commands still come before it. The Pi
+ * asks once per game, so blocking the loop for the ~70 ms the UART needs is
+ * fine.
+ */
+void CommandController::sendTrack(uint32_t cmdId) {
+    const BoardProfile& profile = activeBoardProfile();
+    char line[EVENT_MESSAGE_BUFFER_SIZE];
+    
+    m_eventQueue.flush(QUEUE_SIZE_EVENTS);
+    m_eventQueue.sendAckNow("TRACK", cmdId);
+    
+    buildTrackHeaderLine(line, sizeof(line), profile);
+    m_eventQueue.writeLine(line);
+    
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        if (buildTrackHoldLine(line, sizeof(line), profile, i) > 0) {
+            m_eventQueue.writeLine(line);
+        }
+    }
+    
+    m_eventQueue.sendDoneNow("TRACK", cmdId);
 }
 
 bool CommandController::queueCommand(const ParsedCommand& cmd) {
@@ -715,6 +772,60 @@ void CommandController::tickCommand(QueuedCommand& qc) {
 
 const char* CommandController::skipWhitespace(const char* str) {
     while (*str == ' ' || *str == '\t') str++;
+    return str;
+}
+
+/**
+ * SNAKE <start> <len> [r,g,b] — leaves `p` at the optional #id.
+ * `start` may carry a minus sign (the overlay is clamped to the track); a
+ * missing color means red. Anything else in the line is bad_format.
+ */
+bool CommandController::parseSnakeParams(const char*& p, ParsedCommand& cmd) {
+    uint32_t value = 0;
+    
+    bool negative = (*p == '-');
+    if (negative) p++;
+    p = parseUnsigned(p, 0xFFFF, value);
+    if (!p || findTokenEnd(p) != p) return false;
+    cmd.snakeStart = negative ? -(int32_t)value : (int32_t)value;
+    p = skipWhitespace(p);
+    
+    p = parseUnsigned(p, 0xFFFF, value);
+    if (!p || findTokenEnd(p) != p) return false;
+    cmd.snakeLength = (uint16_t)value;
+    p = skipWhitespace(p);
+    
+    cmd.r = 255;
+    cmd.g = 0;
+    cmd.b = 0;
+    if (*p != '\0' && *p != '#') {
+        uint32_t r = 0, g = 0, b = 0;
+        p = parseUnsigned(p, 255, r);
+        if (!p || *p != ',') return false;
+        p = parseUnsigned(p + 1, 255, g);
+        if (!p || *p != ',') return false;
+        p = parseUnsigned(p + 1, 255, b);
+        if (!p || findTokenEnd(p) != p) return false;
+        cmd.r = (uint8_t)r;
+        cmd.g = (uint8_t)g;
+        cmd.b = (uint8_t)b;
+        p = skipWhitespace(p);
+    }
+    
+    return *p == '\0' || *p == '#';
+}
+
+/// Decimal digits at `str`, at most `maxValue`. Returns the first character
+/// after them, or nullptr when there are none or the value is too large.
+const char* CommandController::parseUnsigned(const char* str, uint32_t maxValue, uint32_t& out) {
+    if (*str < '0' || *str > '9') return nullptr;
+    uint32_t value = 0;
+    while (*str >= '0' && *str <= '9') {
+        value = value * 10 + (uint32_t)(*str - '0');
+        if (value > maxValue) return nullptr;
+        str++;
+    }
+    out = value;
     return str;
 }
 

@@ -18,6 +18,10 @@
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
  *   DEFEAT_ANIMATION [#id]        - Play defeat animation (red full-board pulses)
  *   INDICATE_RECORDING [#id]      - Light all positions static dim white (clear with HIDE_ALL)
+ *   SNAKE <start> <len> [r,g,b] [#id] - Paint track span [start, start+len) on top of
+ *                                   the positions (default red 255,0,0); a new SNAKE
+ *                                   moves it. Clamped to the track.
+ *   SNAKE_OFF [#id]               - Remove the snake overlay (HIDE_ALL does too)
  * 
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for touch
@@ -36,6 +40,9 @@
  *   PING [#id]                    - Health check
  *   INFO [#id]                    - Get firmware info
  *   SCAN [#id]                    - Scan for connected sensors
+ *   TRACK [#id]                   - Report the LED track: ACK, `TRACK length=<n> width=<w>`,
+ *                                   one `TRACK_HOLD H01 <t>[,<t_mirror>]` per hold, DONE
+ *                                   (see SnakeTrack.h)
  */
 
 #ifndef COMMAND_CONTROLLER_H
@@ -81,7 +88,10 @@ enum class CommandAction : uint8_t {
     PING,
     CLEAN_QUEUE,
     HANDSOFF_DETECTION_ON,
-    HANDSOFF_DETECTION_OFF
+    HANDSOFF_DETECTION_OFF,
+    TRACK,
+    SNAKE,
+    SNAKE_OFF
 };
 
 // ============================================================================
@@ -98,6 +108,8 @@ struct ParsedCommand {
     uint8_t extraValue;  // For commands that need an extra numeric parameter (e.g., sensitivity level)
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
+    int32_t snakeStart;  // SNAKE: first track index (may be negative; clamped)
+    uint16_t snakeLength; // SNAKE: number of LEDs
     HoldMask excludeMask; // EXPECT_ANY_EXCEPT: bit i set => input i is excluded
     bool valid;
 };
@@ -156,15 +168,19 @@ private:
     static bool actionRequiresPosition(CommandAction action);
     static bool actionIsLongRunning(CommandAction action);
     
+    bool parseSnakeParams(const char*& p, ParsedCommand& cmd);
+    
     // Execution methods
     void executeCommand(const ParsedCommand& cmd);
     void executeInstant(const ParsedCommand& cmd);
     bool queueCommand(const ParsedCommand& cmd);
+    void sendTrack(uint32_t cmdId);
     void tickCommand(QueuedCommand& qc);
     
     // Utilities
     static const char* skipWhitespace(const char* str);
     static const char* findTokenEnd(const char* str);
+    static const char* parseUnsigned(const char* str, uint32_t maxValue, uint32_t& out);
     static bool strcasecmpN(const char* a, const char* b, size_t len);
 
 public:

@@ -51,6 +51,10 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   brush-by rejection for recording mode, hands-off/presence events.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
+- **Snake overlay:** both strips chained into one track; `TRACK` reports its
+  length and where every hold sits on it, `SNAKE <start> <len> [r,g,b]` paints
+  a span of it on top of the holds and `SNAKE_OFF` removes it. The Snake game
+  itself runs on the Pi; `INFO` announces support as `features=snake`.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 
@@ -58,7 +62,8 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 |---|---|
 | `CommandController` | Serial command parsing & execution |
 | `EventQueue` | Thread-safe outgoing message queue |
-| `LedController` | Position→LED mapping and all animations |
+| `LedController` | Position→LED mapping, all animations, snake overlay |
+| `SnakeTrack.h` | Track math for `TRACK`/`SNAKE` (pure, host-tested) |
 | `TouchController` | CAP1188 driver, debounce, touch expectations |
 | `StartupController` | Boot sequence & Pi handshake |
 | `Config.h` | All pins, timing, colors, and the hold↔sensor wiring table |
@@ -72,6 +77,7 @@ the old ESP32 WROOM board).
 pio run                # build
 pio run -t upload      # flash over USB
 pio device monitor     # serial monitor (115200 baud)
+pio test -e native     # host tests, no hardware
 ```
 
 ## Updates in the field

@@ -4,7 +4,9 @@
  * 
  * Manages the active board profile's logical LED positions (H01..H{holdCount})
  * mapped to two physical LED strips.
- * Supports SHOW, HIDE, SUCCESS, BLINK, STOP_BLINK, and SEQUENCE_COMPLETED.
+ * Supports SHOW, HIDE, SUCCESS, BLINK, STOP_BLINK, and SEQUENCE_COMPLETED,
+ * plus the SNAKE overlay: a free span of the track (see SnakeTrack.h) painted
+ * on top of whatever the positions show.
  */
 
 #ifndef LED_CONTROLLER_H
@@ -36,6 +38,10 @@ struct PositionData {
     uint32_t lastAnimationTime;
     bool blinkOn;
     uint8_t expansionRadius;  // Current expansion radius for EXPAND_STEP/CONTRACT_STEP
+    // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
+    // a red core and a finished CONTRACT a green one, and repaintPosition()
+    // has to restore the right one after the snake passed over it.
+    uint8_t coreR, coreG, coreB;
 };
 
 // ============================================================================
@@ -75,6 +81,13 @@ public:
     
     // Recording indicator (static dim white on all positions; clear with hideAll())
     void indicateRecording();
+    
+    // Snake overlay: paint track span [start, start+length) on top of the
+    // positions (clamped to the track; start may be negative). One overlay at
+    // a time; a new call moves it. hideAll() removes it as well.
+    void snake(int32_t start, uint16_t length, uint8_t r, uint8_t g, uint8_t b);
+    void snakeOff();
+
     // State queries
     bool isAnimationComplete(uint8_t position) const;
     bool isContractComplete(uint8_t position) const;
@@ -110,6 +123,12 @@ private:
     uint8_t m_menuChangeR, m_menuChangeG, m_menuChangeB;
     uint32_t m_menuChangeLastTime;
     
+    // Snake overlay state, as a half-open track span [start, end)
+    bool m_snakeActive;
+    uint16_t m_snakeStart;
+    uint16_t m_snakeEnd;
+    uint8_t m_snakeR, m_snakeG, m_snakeB;
+    
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
     const LedMirror* getMirror(uint8_t position) const;
@@ -120,6 +139,15 @@ private:
     uint16_t getStripLength(StripId strip) const;
     void setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, uint8_t b);
     void clearExpandedRegion(uint8_t position, const LedMapping* mapping);
+    void setCoreColor(uint8_t position, uint8_t r, uint8_t g, uint8_t b);
+    // Repaint a position from its state alone (static states; a running
+    // expansion is drawn at its current step). Used to restore what the
+    // snake covered.
+    void repaintPosition(uint8_t position);
+    bool positionTouchesTrackSpan(uint8_t position, uint16_t start, uint16_t end) const;
+    void moveSnake(bool active, uint16_t start, uint16_t end);
+    void releaseTrackSpan(uint16_t start, uint16_t end);
+    void paintSnake();
     void updateAnimation(uint8_t position, uint32_t nowMillis);
     void updateContractAnimation(uint8_t position, uint32_t nowMillis);
     void updateBlinking(uint32_t nowMillis);

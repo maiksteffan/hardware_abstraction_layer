@@ -389,6 +389,11 @@ size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection) {
     }
     length = appendTo(buffer, size, length, " default=%s", defaultBoardProfile().slug);
 
+    // Optional protocol extensions, comma-separated. The Pi only uses a
+    // command family when its feature is listed here, so it can talk to older
+    // firmware without probing. snake = TRACK / SNAKE / SNAKE_OFF.
+    length = appendTo(buffer, size, length, " features=snake");
+
     if (withSelection) {
         const BoardProfile& profile = activeBoardProfile();
         length = appendTo(buffer, size, length, " boardVersion=%s holds=%u",

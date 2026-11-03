@@ -267,6 +267,43 @@ bool EventQueue::queueHandsOff(uint32_t commandId) {
 }
 
 // ============================================================================
+// Synchronous output
+// ============================================================================
+
+void EventQueue::sendAckNow(const char* action, uint32_t commandId) {
+    Event event;
+    event.type = EventType::ACK;
+    strncpy(event.action, action, sizeof(event.action) - 1);
+    event.action[sizeof(event.action) - 1] = '\0';
+    event.position[0] = '\0';
+    event.commandId = commandId;
+    event.extra[0] = '\0';
+    event.valid = true;
+    sendEvent(event);
+}
+
+void EventQueue::sendDoneNow(const char* action, uint32_t commandId) {
+    Event event;
+    event.type = EventType::DONE;
+    strncpy(event.action, action, sizeof(event.action) - 1);
+    event.action[sizeof(event.action) - 1] = '\0';
+    event.position[0] = '\0';
+    event.commandId = commandId;
+    event.extra[0] = '\0';
+    event.valid = true;
+    sendEvent(event);
+}
+
+void EventQueue::writeLine(const char* line) {
+    char buffer[EVENT_MESSAGE_BUFFER_SIZE];
+    int length = snprintf(buffer, sizeof(buffer) - 1, "%s", line);
+    if (length < 0) return;
+    if (length > (int)sizeof(buffer) - 2) length = (int)sizeof(buffer) - 2;
+    buffer[length++] = '\n';
+    writeRaw(buffer, (size_t)length);
+}
+
+// ============================================================================
 // Private Methods
 // ============================================================================
 
@@ -369,6 +406,10 @@ void EventQueue::sendEvent(const Event& event) {
         buffer[length++] = '\n';
     }
     
+    writeRaw(buffer, (size_t)length);
+}
+
+void EventQueue::writeRaw(const char* buffer, size_t length) {
     // Thread-safe serial write
     // Block indefinitely on the serial mutex: dropping an outbound message
     // silently (e.g. SCANNED, ACK, DONE) is far worse than briefly blocking

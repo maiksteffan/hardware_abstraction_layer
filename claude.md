@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.1.3` |
+| `FIRMWARE_VERSION` | `1.2.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -208,6 +208,25 @@ Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
   menu-change sweep. Async commands report `DONE` via
   `CommandController::tickCommand()` polling `is...Complete()`.
 
+### Track & snake overlay
+
+For the Snake game both strips are chained into one line, the **track**
+([include/SnakeTrack.h](include/SnakeTrack.h), pure and host-tested): strip 2
+backwards, then strip 1, so with `L1`/`L2` the active profile's strip
+lengths, track index `t < L2` is `(STRIP2, L2-1-t)` and `t >= L2` is
+`(STRIP1, t-L2)`; the track is `L1+L2` long. A profile without strip 2
+(`dev-5hold`) is just strip 1.
+
+`SNAKE` paints a span of it as an **overlay** on top of the positions — the
+backend owns the snake, the firmware only paints where it is told. The
+backend moves it up to ~40×/s, so a move is cheap: LEDs the snake leaves go
+dark, the positions whose block (core, expansion rings, mirror) touches them
+are repainted from their state (`repaintPosition()`; `PositionData` keeps
+the core color because `SHOWN` may be purple, red after `FAIL` or green after
+`CONTRACT`), and `update()` repaints the snake before every `show()`, so
+running animations (success expansion, blink, full-board pulses) never draw
+over it. `HIDE_ALL` drops the overlay too.
+
 ## 2.7 Build, flash, debug
 
 PlatformIO ([platformio.ini](platformio.ini)); default env
@@ -218,6 +237,7 @@ pio run                      # build (default env)
 pio run -t upload            # flash over USB
 pio device monitor           # 115200 baud serial monitor
 pio run -e esp32dev          # legacy WROOM board
+pio test -e native           # host tests: board profiles, INFO line, track math
 ```
 
 `pio` may not be on PATH → use `~/.platformio/penv/bin/pio`.
@@ -256,6 +276,8 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 | `SEQUENCE_COMPLETED [#id]` | `ACK` → `DONE` | **Async**: full-board victory pulses |
 | `DEFEAT_ANIMATION [#id]` | `ACK` → `DONE` | **Async**: red full-board pulses |
 | `MENUE_CHANGE <r,g,b> <range> [#id]` | `ACK` → `DONE` | **Async**: color sweep to `<range>` (spelling "MENUE" is intentional) |
+| `SNAKE <start> <len> [r,g,b] [#id]` | `ACK SNAKE [#id]` | Overlay track span `[start, start+len)` (see 2.6), default red `255,0,0`; clamped to the track, `start` may be negative. Moves the existing overlay. Malformed → `ERR bad_format` |
+| `SNAKE_OFF [#id]` | `ACK SNAKE_OFF [#id]` | Remove the overlay, restoring what it covered |
 
 Async commands (`SUCCESS`, `CONTRACT`, `SEQUENCE_COMPLETED`,
 `DEFEAT_ANIMATION`, `MENUE_CHANGE`) get an immediate `ACK`, run via
@@ -283,9 +305,10 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.1.3 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.2.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
+| `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
 
 ## 3.3 Responses & events (ESP32 → Pi)
 
@@ -299,7 +322,8 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0) |
+| `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
 | `DIAG ...` | boot diagnostics; Pi logs and ignores |
@@ -525,6 +549,7 @@ hardware_abstraction_layer/
 ├── include/
 │   ├── Config.h              # board-independent config: pins, timing, colors
 │   ├── BoardProfile.h        # per-board wiring types, ceilings, profile registry API
+│   ├── SnakeTrack.h          # both strips as one track (TRACK/SNAKE), pure, host-tested
 │   ├── CommandController.h
 │   ├── EventQueue.h
 │   ├── LedController.h
@@ -548,6 +573,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.2.0 | Snake support. New `TRACK` (reports the LED track: both strips chained, strip 2 backwards then strip 1, plus every hold's track index), `SNAKE <start> <len> [r,g,b]` (free track span as an overlay on top of the positions) and `SNAKE_OFF`; `HIDE_ALL` also clears the overlay. `INFO` gains `features=snake`. Track math in the pure `SnakeTrack.h`, host-tested |
 | 1.1.3 | Default CAP1188 sensitivity changed 3 → 2 (`CAP1188_DEFAULT_SENSITIVITY`, more sensitive) |
 | 1.1.2 | LED data pins moved into the board profile (`ledPin1`/`ledPin2`). Two board builds on the same MCU do not share their LED wiring, so the pin could not stay in the per-MCU build flags: `dev-5hold` drives its single strip from GPIO25, and driving the WROOM default 19 left it dark, boot sweep included. That profile's holds now sit on STRIP1 — the strip that exists — with STRIP2 length 0 |
 | 1.1.1 | Release builds one merged binary per MCU: `firmware-merged.bin` (ESP32-S3) and `firmware-merged-esp32.bin` (classic ESP32 WROOM), each verified in CI against the `chip_id` in its image header. The `esp32dev` env now overrides the S3 pin defaults (I2C 21/22, LED 18/19) — GPIO 6/7 are SPI-flash pins on the WROOM, so the sensor scan came back empty |

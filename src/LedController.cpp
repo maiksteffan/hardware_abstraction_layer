@@ -8,6 +8,7 @@
  */
 
 #include "LedController.h"
+#include "SnakeTrack.h"
 
 // ============================================================================
 // Constructor
@@ -32,6 +33,12 @@ LedController::LedController()
     , m_menuChangeG(0)
     , m_menuChangeB(0)
     , m_menuChangeLastTime(0)
+    , m_snakeActive(false)
+    , m_snakeStart(0)
+    , m_snakeEnd(0)
+    , m_snakeR(0)
+    , m_snakeG(0)
+    , m_snakeB(0)
 {
 }
 
@@ -63,11 +70,13 @@ void LedController::begin() {
         m_positions[i].lastAnimationTime = 0;
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
+        setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     }
     
     m_sequenceAnimActive = false;
     m_defeatAnimActive = false;
     m_menuChangeActive = false;
+    m_snakeActive = false;
     m_needsUpdate = false;
 }
 
@@ -100,6 +109,10 @@ void LedController::update(uint32_t nowMillis) {
     }
     
     if (m_needsUpdate) {
+        // Whatever was painted since the last frame — a position command, an
+        // expansion step, a blink toggle, a full-board pulse — the snake stays
+        // on top of it.
+        if (m_snakeActive) paintSnake();
         m_strip1.show();
         m_strip2.show();
         m_needsUpdate = false;
@@ -121,6 +134,7 @@ bool LedController::show(uint8_t position) {
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
     m_positions[position].expansionRadius = 0;
+    setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     
     paint(position, 0, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     m_needsUpdate = true;
@@ -157,6 +171,8 @@ void LedController::hideAll() {
     }
     m_sequenceAnimActive = false;
     m_menuChangeActive = false;
+    // The strips are already blank, so there is nothing to restore under it.
+    m_snakeActive = false;
     m_needsUpdate = true;
 }
 
@@ -200,6 +216,7 @@ bool LedController::fail(uint8_t position) {
     
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
+    setCoreColor(position, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
     
     paint(position, 0, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
     m_needsUpdate = true;
@@ -223,6 +240,7 @@ bool LedController::contract(uint8_t position) {
     } else {
         // If not expanded, just ensure it's shown as a single green LED
         m_positions[position].state = PositionState::SHOWN;
+        setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
         paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     }
     
@@ -400,6 +418,151 @@ void LedController::indicateRecording() {
     m_needsUpdate = true;
 }
 
+// ============================================================================
+// Snake overlay
+// ============================================================================
+//
+// The backend moves the snake up to ~40 times a second, so a move touches only
+// what changed: the LEDs the snake leaves go dark, the positions under them are
+// repainted from their state, and the snake is drawn on top at the next frame
+// (update() repaints it before every show()). Nothing is cleared wholesale.
+
+void LedController::snake(int32_t start, uint16_t length, uint8_t r, uint8_t g, uint8_t b) {
+    const int32_t trackLen = trackLength(activeBoardProfile());
+    int32_t end = start + (int32_t)length;
+    if (start < 0) start = 0;
+    if (end > trackLen) end = trackLen;
+    if (end < start) end = start;  // entirely off the track: an empty snake
+
+    m_snakeR = r;
+    m_snakeG = g;
+    m_snakeB = b;
+    moveSnake(true, (uint16_t)start, (uint16_t)end);
+}
+
+void LedController::snakeOff() {
+    moveSnake(false, 0, 0);
+}
+
+void LedController::moveSnake(bool active, uint16_t start, uint16_t end) {
+    if (m_snakeActive) {
+        // The old span minus the new one: up to one piece on either side.
+        // With the new span empty, the two pieces together are the old span.
+        const uint16_t oldStart = m_snakeStart;
+        const uint16_t oldEnd = m_snakeEnd;
+        releaseTrackSpan(oldStart, min(oldEnd, start));
+        releaseTrackSpan(max(oldStart, end), oldEnd);
+    }
+
+    m_snakeActive = active;
+    m_snakeStart = start;
+    m_snakeEnd = end;
+    m_needsUpdate = true;
+}
+
+void LedController::releaseTrackSpan(uint16_t start, uint16_t end) {
+    if (start >= end) return;
+    const BoardProfile& profile = activeBoardProfile();
+
+    for (uint16_t t = start; t < end; t++) {
+        TrackPixel pixel;
+        if (trackToStrip(profile, t, pixel)) {
+            setLed(pixel.strip, (int16_t)pixel.index, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+        }
+    }
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        if (positionTouchesTrackSpan(i, start, end)) repaintPosition(i);
+    }
+}
+
+void LedController::paintSnake() {
+    const BoardProfile& profile = activeBoardProfile();
+    for (uint16_t t = m_snakeStart; t < m_snakeEnd; t++) {
+        TrackPixel pixel;
+        if (trackToStrip(profile, t, pixel)) {
+            setLed(pixel.strip, (int16_t)pixel.index, m_snakeR, m_snakeG, m_snakeB);
+        }
+    }
+}
+
+bool LedController::positionTouchesTrackSpan(uint8_t position, uint16_t start, uint16_t end) const {
+    const PositionData& data = m_positions[position];
+    if (data.state == PositionState::OFF) return false;
+
+    const LedMapping* mapping = getMapping(position);
+    if (!mapping) return false;
+
+    // Widest the position can currently reach: its core plus any ring.
+    int32_t reach = (activeBoardProfile().ledPositionWidth - 1) / 2;
+    switch (data.state) {
+        case PositionState::SHOWN:
+            reach += data.expansionRadius;
+            break;
+        case PositionState::ANIMATING:
+        case PositionState::EXPANDED:
+        case PositionState::CONTRACTING:
+            reach += LED_SUCCESS_EXPANSION_RADIUS;
+            break;
+        default:
+            break;
+    }
+
+    const BoardProfile& profile = activeBoardProfile();
+    uint16_t tLo, tHi;
+    if (stripSpanToTrack(profile, mapping->strip, (int32_t)mapping->index - reach,
+                         (int32_t)mapping->index + reach, tLo, tHi)
+        && tLo < end && tHi >= start) {
+        return true;
+    }
+    const LedMirror* mirror = getMirror(position);
+    if (mirror
+        && stripSpanToTrack(profile, mirror->strip, (int32_t)mirror->index - reach,
+                            (int32_t)mirror->index + reach, tLo, tHi)
+        && tLo < end && tHi >= start) {
+        return true;
+    }
+    return false;
+}
+
+void LedController::repaintPosition(uint8_t position) {
+    const PositionData& data = m_positions[position];
+    uint8_t rings = 0;
+
+    switch (data.state) {
+        case PositionState::OFF:
+            return;
+
+        case PositionState::SHOWN:
+            paint(position, 0, data.coreR, data.coreG, data.coreB);
+            // EXPAND_STEP rings are in the SHOW color whatever the core is.
+            for (uint8_t r = 1; r <= data.expansionRadius; r++) {
+                paint(position, -(int16_t)r, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+                paint(position, (int16_t)r, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+            }
+            return;
+
+        case PositionState::BLINKING:
+            if (data.blinkOn) paint(position, 0, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
+            return;
+
+        case PositionState::EXPANDED:
+            rings = LED_SUCCESS_EXPANSION_RADIUS;
+            break;
+
+        case PositionState::ANIMATING:
+        case PositionState::CONTRACTING:
+            // Drawn at the current step; the animation keeps going from there.
+            rings = data.animationStep;
+            break;
+    }
+
+    paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    for (uint8_t r = 1; r <= rings; r++) {
+        paint(position, -(int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+        paint(position, (int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    }
+}
+
 bool LedController::isAnimationComplete(uint8_t position) const {
     if (position >= activeBoardProfile().holdCount) return true;
     return m_positions[position].state != PositionState::ANIMATING;
@@ -503,6 +666,12 @@ void LedController::clearAll() {
     m_strip2.show();
 }
 
+void LedController::setCoreColor(uint8_t position, uint8_t r, uint8_t g, uint8_t b) {
+    m_positions[position].coreR = r;
+    m_positions[position].coreG = g;
+    m_positions[position].coreB = b;
+}
+
 void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapping) {
     if (!mapping) return;
     
@@ -572,6 +741,7 @@ void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis
     // Check if contraction is complete
     if (data.animationStep == 0) {
         data.state = PositionState::SHOWN;
+        setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     }
     
     m_needsUpdate = true;
