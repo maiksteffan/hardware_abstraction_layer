@@ -12,6 +12,7 @@ class TwoWire {
 public:
     uint8_t registers[128][256] = {};
     bool failStatus[128] = {};
+    uint32_t deltaReads = 0;
 
     void begin(uint8_t, uint8_t) {}
     void setClock(uint32_t) {}
@@ -22,6 +23,7 @@ public:
     }
     uint8_t endTransmission() { return 0; }
     uint8_t requestFrom(uint8_t address, uint8_t) {
+        if (m_register >= 0x10 && m_register <= 0x17) deltaReads++;
         return (m_register == 0x03 && failStatus[address]) ? 0 : 1;
     }
     uint8_t read() { return registers[m_address][m_register]; }

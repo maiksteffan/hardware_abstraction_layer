@@ -45,6 +45,8 @@ TouchController::TouchController()
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
+        m_inputs[i].lastSampleTime = 0;
+        m_inputs[i].releaseEvidenceMs = 0;
         m_inputs[i].pressStartTime = 0;
         m_inputs[i].pressConsumed = false;
 
@@ -60,6 +62,8 @@ TouchController::TouchController()
     memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
     m_pendingAnyTouch = {false, false, COMMAND_ID_NONE, 0};
     m_pendingAnyInput = 0;
+    m_touchStateRequest = {false, false, COMMAND_ID_NONE, 0};
+    m_touchStateInput = 0;
 }
 
 // ============================================================================
@@ -111,6 +115,8 @@ bool TouchController::begin() {
         m_inputs[i].debouncedTouched = false;
         m_inputs[i].lastReportedTouched = false;
         m_inputs[i].lastChangeTime = 0;
+        m_inputs[i].lastSampleTime = 0;
+        m_inputs[i].releaseEvidenceMs = 0;
         m_inputs[i].pressStartTime = 0;
         m_inputs[i].pressConsumed = false;
     }
@@ -136,6 +142,7 @@ void TouchController::tick() {
     processExpectAnyQualification();
     processPendingAnyTouch();
     processHandsOffDetection();
+    processTouchStateRequest();
 }
 
 bool TouchController::recalibrate(uint8_t inputIndex) {
@@ -537,13 +544,27 @@ void TouchController::pollSensors() {
         uint8_t ch = profile.inputMappings[i].channel;
         if (s >= profile.sensorCount || !m_sensors[s].active) continue;
         if (!m_sensors[s].statusValid) {
-            // Missing samples cannot prove a continuous release. Restart the
-            // latch instead of releasing from an old cached "untouched" bit.
-            m_inputs[i].lastChangeTime = now;
+            // An error supplies NO release evidence, but must not erase the
+            // evidence already observed: occasional failures otherwise keep
+            // debouncedTouched/pressConsumed latched indefinitely.
+            m_inputs[i].lastSampleTime = now;
             continue;
         }
 
         bool touched = ((m_sensors[s].lastStatus >> ch) & 0x01) != 0;
+        TouchInputState& input = m_inputs[i];
+        uint32_t elapsed = now - input.lastSampleTime;
+        input.lastSampleTime = now;
+        // Count actual scan cadence (not an assumed ideal 5ms), but never
+        // credit a long unobserved bus stall or a failed poll as a release.
+        if (touched) {
+            input.releaseEvidenceMs = 0;
+        } else if (!input.currentTouched && input.debouncedTouched) {
+            uint32_t credit = elapsed <= TOUCH_RELEASE_MAX_SAMPLE_GAP_MS ? elapsed : 0;
+            uint32_t evidence = input.releaseEvidenceMs + credit;
+            input.releaseEvidenceMs = static_cast<uint16_t>(
+                evidence < TOUCH_DEBOUNCE_RELEASE_MS ? evidence : TOUCH_DEBOUNCE_RELEASE_MS);
+        }
 
         if (touched != m_inputs[i].currentTouched) {
             m_inputs[i].currentTouched = touched;
@@ -594,6 +615,7 @@ void TouchController::processDebounce() {
         uint16_t requiredDebounce = input.currentTouched
                                         ? TOUCH_DEBOUNCE_PRESS_MS
                                         : TOUCH_DEBOUNCE_RELEASE_MS;
+        if (!input.currentTouched) elapsed = input.releaseEvidenceMs;
         if (elapsed < requiredDebounce) continue;
 
         input.debouncedTouched = input.currentTouched;
@@ -646,8 +668,8 @@ void TouchController::processPointExpectations() {
             CommandController::indexToPosition(i, position);
             // EventQueue can wait for a mutex: NEVER call it in a critical section.
             bool queued = direction == 0
-                ? m_eventQueue->queueTouched(position, snapshot.commandId)
-                : m_eventQueue->queueTouchReleased(position, snapshot.commandId);
+                ? m_eventQueue->queueTouched(position, snapshot.commandId, MUTEX_TIMEOUT_TOUCH_QUEUE_MS)
+                : m_eventQueue->queueTouchReleased(position, snapshot.commandId, MUTEX_TIMEOUT_TOUCH_QUEUE_MS);
             if (!queued) continue;
             portENTER_CRITICAL(&m_expectationMux);
             if (expectation.revision == snapshot.revision) {
@@ -727,7 +749,7 @@ void TouchController::processPendingAnyTouch() {
     if (!snapshot.active) return;
     char position[POSITION_STRING_LENGTH];
     CommandController::indexToPosition(input, position);
-    if (!m_eventQueue->queueTouched(position, snapshot.commandId)) return;
+    if (!m_eventQueue->queueTouched(position, snapshot.commandId, MUTEX_TIMEOUT_TOUCH_QUEUE_MS)) return;
     portENTER_CRITICAL(&m_expectationMux);
     if (m_pendingAnyTouch.revision == snapshot.revision) m_pendingAnyTouch.active = false;
     portEXIT_CRITICAL(&m_expectationMux);
@@ -762,6 +784,14 @@ void TouchController::processExpectAnyQualification() {
             c.active = false;
             continue;
         }
+
+        // Track the raw edge across rearm gaps, but do not perform recording
+        // delta I2C traffic during ordinary EXPECT sequence replay. The bus
+        // must remain available for the status reads that detect new presses.
+        portENTER_CRITICAL(&m_expectationMux);
+        bool anyArmed = m_expectAnyTail != m_expectAnyHead;
+        portEXIT_CRITICAL(&m_expectationMux);
+        if (!anyArmed) continue;
 
         // ---- 2. Delta consistency: sample grab strength ----
         int8_t delta;
@@ -819,12 +849,54 @@ void TouchController::processHandsOffDetection() {
 
     bool any = anyInputTouched();
     if (any == m_lastAnyTouched) return;
-    m_lastAnyTouched = any;
 
     if (!m_eventQueue) return;
-    if (any) {
-        m_eventQueue->queueHandsOn();
-    } else {
-        m_eventQueue->queueHandsOff();
-    }
+    bool queued = any ? m_eventQueue->queueHandsOn(COMMAND_ID_NONE, MUTEX_TIMEOUT_TOUCH_QUEUE_MS)
+                      : m_eventQueue->queueHandsOff(COMMAND_ID_NONE, MUTEX_TIMEOUT_TOUCH_QUEUE_MS);
+    // A nonblocking rejection is not an observed transition. Retry on the
+    // next poll while the occupancy still differs from the delivered state.
+    if (queued) m_lastAnyTouched = any;
+}
+
+void TouchController::requestTouchState(uint8_t inputIndex, uint32_t commandId) {
+    if (inputIndex >= activeBoardProfile().holdCount) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    m_touchStateInput = inputIndex;
+    m_touchStateRequest.commandId = commandId;
+    m_touchStateRequest.revision++;
+    m_touchStateRequest.active = true;
+    portEXIT_CRITICAL(&m_expectationMux);
+}
+
+void TouchController::processTouchStateRequest() {
+    if (!m_eventQueue) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    PointExpectation request = m_touchStateRequest;
+    uint8_t inputIndex = m_touchStateInput;
+    PointExpectation expectation = m_expectDown[inputIndex];
+    portEXIT_CRITICAL(&m_expectationMux);
+    if (!request.active) return;
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t sensor = profile.inputMappings[inputIndex].sensorIndex;
+    if (sensor >= profile.sensorCount) return;
+    const TouchInputState& input = m_inputs[inputIndex];
+    char position[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(inputIndex, position);
+    // All raw/debounce state is owned by this core. No concurrent command-side
+    // I2C reads and no clearing/recalibration that could hide the failure.
+    char state[sizeof(Event::extra)];
+    snprintf(state, sizeof(state),
+             "active=%u valid=%u raw=%u held=%u used=%u age_ms=%lu release_ms=%u expect=%u pending=%u",
+             static_cast<unsigned>(m_sensors[sensor].active),
+             static_cast<unsigned>(m_sensors[sensor].statusValid),
+             static_cast<unsigned>(input.currentTouched),
+             static_cast<unsigned>(input.debouncedTouched),
+             static_cast<unsigned>(input.pressConsumed),
+             static_cast<unsigned long>(millis() - input.pressStartTime),
+             static_cast<unsigned>(input.releaseEvidenceMs),
+             static_cast<unsigned>(expectation.active), static_cast<unsigned>(expectation.pending));
+    if (!m_eventQueue->queueTouchState(position, state, request.commandId)) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    if (m_touchStateRequest.revision == request.revision) m_touchStateRequest.active = false;
+    portEXIT_CRITICAL(&m_expectationMux);
 }

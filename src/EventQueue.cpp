@@ -177,7 +177,7 @@ bool EventQueue::queueBusy(uint32_t commandId) {
     return enqueue(event);
 }
 
-bool EventQueue::queueTouched(const char* position, uint32_t commandId) {
+bool EventQueue::queueTouched(const char* position, uint32_t commandId, uint16_t timeoutMs) {
     Event event;
     event.type = EventType::TOUCHED;
     event.action[0] = '\0';
@@ -185,10 +185,10 @@ bool EventQueue::queueTouched(const char* position, uint32_t commandId) {
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
-    return enqueue(event);
+    return enqueue(event, timeoutMs);
 }
 
-bool EventQueue::queueTouchReleased(const char* position, uint32_t commandId) {
+bool EventQueue::queueTouchReleased(const char* position, uint32_t commandId, uint16_t timeoutMs) {
     Event event;
     event.type = EventType::TOUCH_RELEASED;
     event.action[0] = '\0';
@@ -196,7 +196,7 @@ bool EventQueue::queueTouchReleased(const char* position, uint32_t commandId) {
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
-    return enqueue(event);
+    return enqueue(event, timeoutMs);
 }
 
 bool EventQueue::queueScanned(const char* sensorList, uint32_t commandId) {
@@ -244,7 +244,7 @@ bool EventQueue::queueValue(const char* position, int8_t value, uint32_t command
     return enqueue(event);
 }
 
-bool EventQueue::queueHandsOn(uint32_t commandId) {
+bool EventQueue::queueHandsOn(uint32_t commandId, uint16_t timeoutMs) {
     Event event;
     event.type = EventType::HANDS_ON;
     event.action[0] = '\0';
@@ -252,10 +252,10 @@ bool EventQueue::queueHandsOn(uint32_t commandId) {
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
-    return enqueue(event);
+    return enqueue(event, timeoutMs);
 }
 
-bool EventQueue::queueHandsOff(uint32_t commandId) {
+bool EventQueue::queueHandsOff(uint32_t commandId, uint16_t timeoutMs) {
     Event event;
     event.type = EventType::HANDS_OFF;
     event.action[0] = '\0';
@@ -263,7 +263,17 @@ bool EventQueue::queueHandsOff(uint32_t commandId) {
     event.commandId = commandId;
     event.extra[0] = '\0';
     event.valid = true;
-    return enqueue(event);
+    return enqueue(event, timeoutMs);
+}
+
+bool EventQueue::queueTouchState(const char* position, const char* state, uint32_t commandId) {
+    Event event = {};
+    event.type = EventType::TOUCH_STATE;
+    copyPosition(event.position, position);
+    event.commandId = commandId;
+    snprintf(event.extra, sizeof(event.extra), "%s", state);
+    event.valid = true;
+    return enqueue(event, MUTEX_TIMEOUT_TOUCH_QUEUE_MS);
 }
 
 // ============================================================================
@@ -307,10 +317,10 @@ void EventQueue::writeLine(const char* line) {
 // Private Methods
 // ============================================================================
 
-bool EventQueue::enqueue(const Event& event) {
+bool EventQueue::enqueue(const Event& event, uint16_t timeoutMs) {
     bool success = false;
     
-    if (xSemaphoreTake(m_queueMutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_QUEUE_MS)) == pdTRUE) {
+    if (xSemaphoreTake(m_queueMutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {
         if (m_count < QUEUE_SIZE_EVENTS) {
             m_events[m_head] = event;
             m_head = (m_head + 1) % QUEUE_SIZE_EVENTS;
@@ -394,11 +404,16 @@ void EventQueue::sendEvent(const Event& event) {
         case EventType::HANDS_OFF:
             length = snprintf(buffer, sizeof(buffer), "HANDS_OFF");
             break;
+
+        case EventType::TOUCH_STATE:
+            length = snprintf(buffer, sizeof(buffer), "TOUCH_STATE %s %s", event.position, event.extra);
+            break;
     }
     
     // Append command ID if present
     if (event.commandId != COMMAND_ID_NONE) {
-        length += snprintf(buffer + length, sizeof(buffer) - length, " #%lu", event.commandId);
+        length += snprintf(buffer + length, sizeof(buffer) - length, " #%lu",
+                   static_cast<unsigned long>(event.commandId));
     }
     
     // Append newline

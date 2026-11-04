@@ -31,6 +31,7 @@
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value
+ *   TOUCH_STATE <pos> [#id]       - Read raw/debounced/consumed/expectation state without recalibration
  *   SET_SENSITIVITY <pos> <lvl>   - Set sensitivity (0=most, 7=least)
  *   CLEAN_QUEUE [#id]             - Clear all pending touch expectations
  *   HANDSOFF_DETECTION_ON [#id]   - Enable HANDS_ON/HANDS_OFF occupancy events
@@ -80,6 +81,7 @@ enum class CommandAction : uint8_t {
     RECALIBRATE_ALL,
     VALUE,
     SET_SENSITIVITY,
+    TOUCH_STATE,
     SCAN,
     SEQUENCE_COMPLETED,
     DEFEAT_ANIMATION,

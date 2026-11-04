@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.2.4` |
+| `FIRMWARE_VERSION` | `1.2.5` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -171,8 +171,13 @@ Runs on Core 0 every 5 ms:
 **Debounce (asymmetric):** press is instant (`TOUCH_DEBOUNCE_PRESS_MS` = 0);
 release is latched `TOUCH_DEBOUNCE_RELEASE_MS` = 500 ms — transient
 re-contacts keep the touch held. Release timers are per hold, so releasing
-one hold never blocks another hold's press. Failed status reads restart the
-release timer and cannot confirm a release from stale cached state. A consumed
+one hold never blocks another hold's press. Since 1.2.5, release uses
+`releaseEvidenceMs`: a valid untouched poll contributes its actual sample
+interval (only if ≤ `TOUCH_RELEASE_MAX_SAMPLE_GAP_MS`, 50 ms), a valid touched
+poll resets the evidence, and a failed status read
+pauses it without erasing progress. This avoids indefinite consumption lockout
+under periodic I2C errors. Missing samples and long bus gaps cannot confirm a
+release from stale cached state. A consumed
 hold still needs the full release latch before re-grabbing it can count again.
 
 **Single-consumption rule (`pressConsumed`, critical fix in v1.0.4):** each
@@ -203,6 +208,10 @@ delayed beyond release or freshness expiry. Per-request revision counters keep
 completion of an old delivery from clearing a concurrently rearmed command,
 including commands without ids. Replacing/clearing an expectation cancels its
 undelivered point report; `CLEAN_QUEUE` also drops pending ANY reports.
+Since 1.2.5, polling-core submissions use `MUTEX_TIMEOUT_TOUCH_QUEUE_MS = 0`:
+event queue contention never adds 10 ms per pending report to the sensor tick.
+Point/ANY reports retry without blocking, as do current occupancy transitions.
+Command-side queue calls keep their existing timeout.
 
 **EXPECT_ANY qualification (brush-by rejection):** `EXPECT <pos>` is instant
 (only the armed hold can fire), but `EXPECT_ANY` arms every hold, so a new
@@ -219,6 +228,18 @@ After a raw dropout cancels qualification, re-contact during the release latch
 restarts it only for fresh, unconsumed grabs; consumed grabs never fire twice.
 `CLEAN_QUEUE` still discards all pending candidates. No event is emitted without
 an eligible expectation, and status-read failures cannot qualify cached contact.
+Raw candidate tracking continues during rearm gaps, but delta-register sampling
+is skipped when the EXPECT_ANY queue is empty, keeping recording-only I2C work
+out of ordinary single-hold sequence replay.
+
+**On-demand diagnosis (since 1.2.5):** `TOUCH_STATE <pos> [#id]` gets ACK then
+one polling-core snapshot of sensor-active/read-valid/raw/debounced/consumed
+state, press age, observed release evidence, and single-hold expectation/pending
+flags. It adds no I2C reads, never recalibrates or consumes a grab, and retries
+delivery with zero mutex wait. Query before recalibrating a blocked hold to
+distinguish sensor silence, invalid I2C reads, consumption and delivery gating.
+Only one diagnostic request should be outstanding; a newer request replaces
+an undelivered one. Existing protocol messages/ids are unchanged.
 
 **Hands-off detection:** while enabled, emits `HANDS_ON`/`HANDS_OFF` on
 board-occupancy transitions; enabling reports the current state immediately.
@@ -324,6 +345,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `RECALIBRATE <pos> [#id]` | `ACK`, then `RECALIBRATED <pos> [#id]` | Recalibrate one channel |
 | `RECALIBRATE_ALL [#id]` | `ACK`, then `RECALIBRATED ALL [#id]` | Recalibrate all enabled channels |
 | `VALUE <pos> [#id]` | `VALUE <pos> <delta> [#id]` | Signed delta register (-128..127) |
+| `TOUCH_STATE <pos> [#id]` | `ACK`, then `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` | Non-mutating polling-core diagnostic; `raw` is cached when `valid=0`; `expect`/`pending` refer to single-hold EXPECT. One outstanding request, newest replaces undelivered request |
 | `SET_SENSITIVITY <pos> <0-7> [#id]` | `ACK` | 0 = most sensitive. ⚠ Global per CAP1188 chip |
 | `HANDSOFF_DETECTION_ON [#id]` | `ACK` + immediate `HANDS_ON`/`HANDS_OFF` | Enable occupancy events, report current state once |
 | `HANDSOFF_DETECTION_OFF [#id]` | `ACK` | Disable occupancy events |
@@ -333,7 +355,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.2.4 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.2.5 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -350,6 +372,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
+| `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
 | `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
@@ -603,6 +626,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.2.5 | Address replay lockout paths missed by zero-latency host mocks: periodic I2C failures now pause rather than restart observed release evidence, while valid re-contact still resets it; polling-core touch/release/occupancy delivery uses zero-wait mutex acquisition and retries; skip EXPECT_ANY delta reads while no ANY request is queued. Add non-mutating `TOUCH_STATE <pos>` diagnostic to expose the actual sensor/consumption/expectation gate before recalibration. Add periodic-error, mutex-time, replay-I2C, release-evidence and diagnostic regressions. Preserve 500 ms evidence threshold, single-consumption and existing protocol messages. Physical cause on the reported board remains unverified |
 | 1.2.4 | Fix missed single-hold touches at sequence start/mid-sequence: evaluate EXPECT/EXPECT_RELEASE on every sensor tick with synchronized registration instead of a command-side check-then-arm race; do not accept raw-untouched release-latched holds. Retain matched touch/release and qualified EXPECT_ANY reports across event queue rejection, with revision-safe completion and CLEAN_QUEUE cancellation. Preserve single-consumption, 2 s freshness, 500 ms release latch, protocol grammar and ids. Add event-delivery and expectation lifecycle regressions |
 | 1.2.3 | Fix missed touches during hold handoffs: qualify fresh grabs across EXPECT_ANY rearm gaps, recover unconsumed candidates after raw dropouts, retain fresh excluded candidates for later expectations, and share `pressConsumed` between EXPECT and EXPECT_ANY instead of a batch-wide used mask. Missing I²C status reads no longer confirm releases. Preserve the working-tree 500 ms release latch. Correct CAP1188 channel ceiling to 8 so v2 H32/CS8 is enabled. Native touch-controller regression tests; protocol grammar and ids unchanged |
 | 1.2.0 | Snake support. New `TRACK` (reports the LED track: both strips chained, strip 2 backwards then strip 1, plus every hold's track index), `SNAKE <start> <len> [r,g,b]` (free track span as an overlay on top of the positions) and `SNAKE_OFF`; `HIDE_ALL` also clears the overlay. `INFO` gains `features=snake`. Track math in the pure `SnakeTrack.h`, host-tested |

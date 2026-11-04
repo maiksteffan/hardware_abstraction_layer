@@ -40,6 +40,8 @@ struct TouchInputState {
     bool debouncedTouched;
     bool lastReportedTouched;
     uint32_t lastChangeTime;
+    uint32_t lastSampleTime;      // Includes failed polls; long gaps are never credited
+    uint16_t releaseEvidenceMs;   // Untouched evidence; failed reads pause, never restart it
     uint32_t pressStartTime;   // millis() of the last debounced press edge
     bool pressConsumed;        // Current press already satisfied an EXPECT/EXPECT_ANY;
                                // requires release + re-grab before it can satisfy another
@@ -138,6 +140,8 @@ public:
 
     // Sensor value reading (delta count for the input's CAP1188 channel)
     bool readSensorValue(uint8_t inputIndex, int8_t& value);
+    // On-demand snapshot built on the polling core; no additional I2C traffic.
+    void requestTouchState(uint8_t inputIndex, uint32_t commandId);
 
 private:
     EventQueue* m_eventQueue;
@@ -150,6 +154,8 @@ private:
     PointExpectation m_expectUp[MAX_HOLDS];
     PointExpectation m_pendingAnyTouch;
     uint8_t m_pendingAnyInput;
+    PointExpectation m_touchStateRequest;
+    uint8_t m_touchStateInput;
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
@@ -169,6 +175,7 @@ private:
     void processDebounce();
     void processPointExpectations();  // Claim states and retry rejected events every tick
     void processPendingAnyTouch();    // Retry an already-qualified EXPECT_ANY event
+    void processTouchStateRequest();  // Nonblocking, on-demand diagnostic reply
     void processExpectAnyQualification();  // Advance/finish EXPECT_ANY candidates
     void startAnyCandidate(uint8_t inputIndex, uint32_t now);
     void recordPressEdge(uint32_t now);    // Sweep detection bookkeeping

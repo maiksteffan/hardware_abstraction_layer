@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.2.4"
+#define FIRMWARE_VERSION "1.2.5"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -132,6 +132,7 @@ constexpr uint16_t BOARD_VERSION_TIMEOUT_MS = 3000;
 
 // Mutex timeout values (milliseconds)
 constexpr uint16_t MUTEX_TIMEOUT_QUEUE_MS  = 10;
+constexpr uint16_t MUTEX_TIMEOUT_TOUCH_QUEUE_MS = 0; // Polling core must never wait for event delivery
 constexpr uint16_t MUTEX_TIMEOUT_SERIAL_MS = 20;
 constexpr uint16_t MUTEX_TIMEOUT_FLUSH_MS  = 5;
 
@@ -147,15 +148,17 @@ constexpr uint8_t TOUCH_CHANNELS_PER_SENSOR = 8;     // CAP1188 CS1..CS8 (profil
 constexpr uint8_t POSITION_STRING_LENGTH = 4;
 
 constexpr uint16_t TOUCH_POLL_INTERVAL_MS = 5;
+// Account for normal scan-time variation, but never credit a long bus stall.
+constexpr uint16_t TOUCH_RELEASE_MAX_SAMPLE_GAP_MS = TOUCH_POLL_INTERVAL_MS * 10;
 
 // Asymmetric debounce — INSTANT on press, very latched on release.
 // Press fires on the first sample (no debounce delay), giving sub-poll-cycle
-// response. Release requires the sensor to read "untouched" continuously for
-// TOUCH_DEBOUNCE_RELEASE_MS — every transient "touched" sample during that
-// window resets the timer (see TouchController::pollSensors()), so even
-// repeated short re-contacts keep the touch latched.
+// response. Release requires TOUCH_DEBOUNCE_RELEASE_MS of observed untouched
+// evidence. Any valid "touched" sample resets it; a failed I2C read pauses
+// rather than erases progress. Long gaps never count as release evidence.
+// The evidence is per hold, independent of other holds and event delivery.
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 500;    // short release latch so quick hold-to-hold transitions are detected
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 500;   // observed release evidence; not a global touch lockout
 
 // ----------------------------------------------------------------------------
 // 6b. EXPECT_ANY QUALIFICATION (brush-by rejection for climbing holds)

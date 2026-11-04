@@ -30,7 +30,8 @@ enum class EventType : uint8_t {
     INFO,           // Firmware info
     VALUE,          // Sensor value response
     HANDS_ON,       // Hands-off detection: board went from untouched to touched
-    HANDS_OFF       // Hands-off detection: board went from touched to untouched
+    HANDS_OFF,      // Hands-off detection: board went from touched to untouched
+    TOUCH_STATE     // On-demand touch pipeline diagnostic snapshot
 };
 
 // ============================================================================
@@ -68,18 +69,23 @@ public:
     uint8_t count() const;
     
     // Queue event methods (thread-safe, callable from any core)
+    // Polling-core touch/occupancy reports pass MUTEX_TIMEOUT_TOUCH_QUEUE_MS
+    // (zero) and retry later. Command-side replies retain the normal timeout.
     bool queueAck(const char* action, const char* position = nullptr, uint32_t commandId = COMMAND_ID_NONE);
     bool queueDone(const char* action, const char* position = nullptr, uint32_t commandId = COMMAND_ID_NONE);
     bool queueError(const char* reason, uint32_t commandId = COMMAND_ID_NONE);
     bool queueBusy(uint32_t commandId = COMMAND_ID_NONE);
-    bool queueTouched(const char* position, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueTouchReleased(const char* position, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueTouched(const char* position, uint32_t commandId = COMMAND_ID_NONE,
+                      uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
+    bool queueTouchReleased(const char* position, uint32_t commandId = COMMAND_ID_NONE,
+                            uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     bool queueScanned(const char* sensorList, uint32_t commandId = COMMAND_ID_NONE);
     bool queueRecalibrated(const char* position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
     bool queueValue(const char* position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
-    bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE);
-    bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE);
+    bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
+    bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
+    bool queueTouchState(const char* position, const char* state, uint32_t commandId);
     
     // Synchronous output that bypasses the queue, for replies longer than the
     // queue should carry (TRACK: one line per hold). Main loop only, and
@@ -98,7 +104,7 @@ private:
     SemaphoreHandle_t m_queueMutex;
     SemaphoreHandle_t m_serialMutex;
     
-    bool enqueue(const Event& event);
+    bool enqueue(const Event& event, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     void sendEvent(const Event& event);
     void writeRaw(const char* buffer, size_t length);
 };

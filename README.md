@@ -59,6 +59,10 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   command/press registration race. Confirmed touch/release reports are retried
   if the outgoing queue is temporarily full or its mutex is unavailable;
   `CLEAN_QUEUE` cancels those pending reports too.
+  Polling-core event submissions never wait for the queue mutex. Failed I2C
+  status reads pause release evidence instead of restarting the whole latch;
+  periodic errors therefore cannot keep an otherwise released hold consumed
+  forever. Recording delta reads are skipped when no `EXPECT_ANY` is armed.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its
@@ -93,6 +97,25 @@ pio test -e native     # host tests, no hardware
 Native tests cover board profiles, track math and the real touch controller
 with simulated CAP1188 registers and time (handoffs, rearm gaps, dropouts,
 one-event-per-grab, exclusions, release timing and occupancy transitions).
+
+### Diagnosing an ignored hold
+
+Before recalibrating, send `TOUCH_STATE H05 #123` over the existing serial
+connection. It replies `ACK TOUCH_STATE H05 #123`, followed by one
+`TOUCH_STATE H05 active=... valid=... raw=... held=... used=... age_ms=... release_ms=... expect=... pending=... #123` line.
+Use the affected hold number. The snapshot is built by the polling core,
+does not read extra I2C registers, and does not change expectations or touch state.
+
+- `valid=0`: that poll's sensor-status read failed (`raw` is cached).
+- `valid=1 raw=0`: the chip did not report contact on that poll.
+- `held=1 used=1`: the previous grab is still consumed; observe the release evidence.
+- `expect=0`: no single-hold press expectation is armed.
+- `expect=1 pending=1`: a touch was detected and is awaiting queue delivery.
+- `age_ms>2000` on an unconsumed held input: too old to satisfy a newly armed `EXPECT`.
+
+Only one diagnostic query should be outstanding at a time; a new query replaces
+an undelivered snapshot request. Stop the Pi's serial connection before opening
+a separate monitor—two readers on one serial port would invalidate the diagnosis.
 
 ## Updates in the field
 

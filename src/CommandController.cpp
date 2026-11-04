@@ -318,6 +318,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "RECALIBRATE", len)) return CommandAction::RECALIBRATE;
     if (strcasecmpN(str, "RECALIBRATE_ALL", len)) return CommandAction::RECALIBRATE_ALL;
     if (strcasecmpN(str, "VALUE", len)) return CommandAction::VALUE;
+    if (strcasecmpN(str, "TOUCH_STATE", len)) return CommandAction::TOUCH_STATE;
     if (strcasecmpN(str, "SET_SENSITIVITY", len)) return CommandAction::SET_SENSITIVITY;
     if (strcasecmpN(str, "SCAN", len)) return CommandAction::SCAN;
     if (strcasecmpN(str, "SEQUENCE_COMPLETED", len)) return CommandAction::SEQUENCE_COMPLETED;
@@ -354,6 +355,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::RECALIBRATE: return "RECALIBRATE";
         case CommandAction::RECALIBRATE_ALL: return "RECALIBRATE_ALL";
         case CommandAction::VALUE: return "VALUE";
+        case CommandAction::TOUCH_STATE: return "TOUCH_STATE";
         case CommandAction::SET_SENSITIVITY: return "SET_SENSITIVITY";
         case CommandAction::SCAN: return "SCAN";
         case CommandAction::SEQUENCE_COMPLETED: return "SEQUENCE_COMPLETED";
@@ -386,6 +388,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::EXPECT_RELEASE:
         case CommandAction::RECALIBRATE:
         case CommandAction::VALUE:
+        case CommandAction::TOUCH_STATE:
         case CommandAction::SET_SENSITIVITY:
             return true;
         default:
@@ -494,9 +497,9 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::EXPECT:
             if (m_touchController) {
-                // ACK must be queued BEFORE arming: if the input is already
-                // held, setExpectDown() emits TOUCHED immediately and the Pi
-                // expects ACK -> TOUCHED ordering.
+                // ACK must be queued BEFORE arming: the polling core may
+                // report an already-held input as soon as registration is
+                // published, and the Pi expects ACK -> TOUCHED ordering.
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
                 m_touchController->setExpectDown(cmd.positionIndex, cmdId);
             } else {
@@ -591,6 +594,15 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             }
             break;
             
+        case CommandAction::TOUCH_STATE:
+            if (m_touchController) {
+                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+                m_touchController->requestTouchState(cmd.positionIndex, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+
         case CommandAction::INFO:
             m_eventQueue.queueInfo(cmdId);
             break;
