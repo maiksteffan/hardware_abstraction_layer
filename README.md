@@ -55,6 +55,10 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   requiring a full release. The release latch remains 500 ms; it does not
   block another hold's touch. Reusing the **same** consumed hold still
   requires a full debounced release and re-grab.
+  Single-hold expectations are evaluated on every sensor tick, avoiding the
+  command/press registration race. Confirmed touch/release reports are retried
+  if the outgoing queue is temporarily full or its mutex is unavailable;
+  `CLEAN_QUEUE` cancels those pending reports too.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its

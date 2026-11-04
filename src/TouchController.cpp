@@ -48,12 +48,8 @@ TouchController::TouchController()
         m_inputs[i].pressStartTime = 0;
         m_inputs[i].pressConsumed = false;
 
-        m_expectDown[i].active = false;
-        m_expectDown[i].commandId = COMMAND_ID_NONE;
-        m_expectDown[i].excludeMask.clear();
-        m_expectUp[i].active = false;
-        m_expectUp[i].commandId = COMMAND_ID_NONE;
-        m_expectUp[i].excludeMask.clear();
+        m_expectDown[i] = {false, false, COMMAND_ID_NONE, 0};
+        m_expectUp[i] = {false, false, COMMAND_ID_NONE, 0};
     }
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
@@ -62,6 +58,8 @@ TouchController::TouchController()
     }
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
     memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
+    m_pendingAnyTouch = {false, false, COMMAND_ID_NONE, 0};
+    m_pendingAnyInput = 0;
 }
 
 // ============================================================================
@@ -134,7 +132,9 @@ void TouchController::tick() {
 
     pollSensors();
     processDebounce();
+    processPointExpectations();
     processExpectAnyQualification();
+    processPendingAnyTouch();
     processHandsOffDetection();
 }
 
@@ -179,57 +179,46 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
 
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= activeBoardProfile().holdCount) return;
-
-    // If the input is ALREADY held when the EXPECT arrives, there will never
-    // be a press edge. Report TOUCHED immediately - but only if the grab is
-    // FRESH (within EXPECT_HELD_FRESH_MS) AND this press has not already
-    // satisfied a previous EXPECT/EXPECT_ANY. Each press edge may only be
-    // consumed ONCE: without this, a sequence alternating between two holds
-    // that stay held ping-pongs instantly (the same uninterrupted grab
-    // "answers" every re-armed EXPECT), falsely advancing the sequence.
-    // This still covers the legit race of a player grabbing the hold a
-    // moment before the Pi's EXPECT arrives, while stale or already-counted
-    // holds must be released and re-grabbed to count.
-    if (m_inputs[inputIndex].debouncedTouched && m_eventQueue &&
-        !m_inputs[inputIndex].pressConsumed &&
-        (millis() - m_inputs[inputIndex].pressStartTime) <= EXPECT_HELD_FRESH_MS) {
-        m_inputs[inputIndex].pressConsumed = true;
-        char posStr[POSITION_STRING_LENGTH];
-        CommandController::indexToPosition(inputIndex, posStr);
-        m_eventQueue->queueTouched(posStr, commandId);
-        return;
-    }
-
-    m_expectDown[inputIndex].active = true;
-    m_expectDown[inputIndex].commandId = commandId;
+    // Publish atomically; only the polling core may inspect/consume a press.
+    // Checking a held state here and then arming left a race in which the
+    // press edge occurred between those two operations and was lost forever.
+    portENTER_CRITICAL(&m_expectationMux);
+    PointExpectation& expectation = m_expectDown[inputIndex];
+    expectation.commandId = commandId;
+    expectation.pending = false;
+    expectation.revision++;
+    expectation.active = true;
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::setExpectUp(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= activeBoardProfile().holdCount) return;
 
-    // Symmetric to setExpectDown: if the input is already released, there
-    // will never be a release edge - report TOUCH_RELEASED immediately.
-    if (!m_inputs[inputIndex].debouncedTouched && m_eventQueue) {
-        char posStr[POSITION_STRING_LENGTH];
-        CommandController::indexToPosition(inputIndex, posStr);
-        m_eventQueue->queueTouchReleased(posStr, commandId);
-        return;
-    }
-
-    m_expectUp[inputIndex].active = true;
-    m_expectUp[inputIndex].commandId = commandId;
+    portENTER_CRITICAL(&m_expectationMux);
+    PointExpectation& expectation = m_expectUp[inputIndex];
+    expectation.commandId = commandId;
+    expectation.pending = false;
+    expectation.revision++;
+    expectation.active = true;
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::clearExpectDown(uint8_t inputIndex) {
     if (inputIndex >= activeBoardProfile().holdCount) return;
+    portENTER_CRITICAL(&m_expectationMux);
     m_expectDown[inputIndex].active = false;
-    m_expectDown[inputIndex].commandId = COMMAND_ID_NONE;
+    m_expectDown[inputIndex].pending = false;
+    m_expectDown[inputIndex].revision++;
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::clearExpectUp(uint8_t inputIndex) {
     if (inputIndex >= activeBoardProfile().holdCount) return;
+    portENTER_CRITICAL(&m_expectationMux);
     m_expectUp[inputIndex].active = false;
-    m_expectUp[inputIndex].commandId = COMMAND_ID_NONE;
+    m_expectUp[inputIndex].pending = false;
+    m_expectUp[inputIndex].revision++;
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::setExpectAny(uint32_t commandId) {
@@ -239,6 +228,7 @@ void TouchController::setExpectAny(uint32_t commandId) {
 }
 
 void TouchController::setExpectAnyExcept(const HoldMask& excludeMask, uint32_t commandId) {
+    portENTER_CRITICAL(&m_expectationMux);
     // Enqueue into circular buffer
     m_expectAnyQueue[m_expectAnyHead].active = true;
     m_expectAnyQueue[m_expectAnyHead].commandId = commandId;
@@ -249,9 +239,11 @@ void TouchController::setExpectAnyExcept(const HoldMask& excludeMask, uint32_t c
     if (m_expectAnyHead == m_expectAnyTail) {
         m_expectAnyTail = (m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE;
     }
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::clearExpectAny() {
+    portENTER_CRITICAL(&m_expectationMux);
     for (uint8_t i = 0; i < EXPECT_ANY_QUEUE_SIZE; i++) {
         m_expectAnyQueue[i].active = false;
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
@@ -259,16 +251,17 @@ void TouchController::clearExpectAny() {
     }
     m_expectAnyHead = 0;
     m_expectAnyTail = 0;
+    m_pendingAnyTouch.active = false;
+    m_pendingAnyTouch.revision++;
     // Drop any in-flight qualification candidates as well.
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::clearAllExpectations() {
     for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
-        m_expectDown[i].active = false;
-        m_expectDown[i].commandId = COMMAND_ID_NONE;
-        m_expectUp[i].active = false;
-        m_expectUp[i].commandId = COMMAND_ID_NONE;
+        clearExpectDown(i);
+        clearExpectUp(i);
     }
     clearExpectAny();
 }
@@ -607,11 +600,6 @@ void TouchController::processDebounce() {
         if (input.debouncedTouched == input.lastReportedTouched) continue;
         input.lastReportedTouched = input.debouncedTouched;
 
-        if (!m_eventQueue) continue;
-
-        char posStr[POSITION_STRING_LENGTH];
-        CommandController::indexToPosition(i, posStr);
-
         if (input.debouncedTouched) {
             input.pressStartTime = now;
             input.pressConsumed = false;  // fresh press edge: may satisfy one EXPECT
@@ -622,20 +610,51 @@ void TouchController::processDebounce() {
             // that next press forever. No event is emitted until an eligible
             // EXPECT_ANY exists and the normal brush-by checks have passed.
             startAnyCandidate(i, now);
-            if (m_expectDown[i].active) {
-                input.pressConsumed = true;
-                m_eventQueue->queueTouched(posStr, m_expectDown[i].commandId);
-                m_expectDown[i].active = false;
-                m_expectDown[i].commandId = COMMAND_ID_NONE;
-            }
         } else {
             // Debounced release: any pending candidate is stale by now.
             m_anyCandidates[i].active = false;
-            if (m_expectUp[i].active) {
-                m_eventQueue->queueTouchReleased(posStr, m_expectUp[i].commandId);
-                m_expectUp[i].active = false;
-                m_expectUp[i].commandId = COMMAND_ID_NONE;
+        }
+    }
+}
+
+void TouchController::processPointExpectations() {
+    if (!m_eventQueue) return;
+    const BoardProfile& profile = activeBoardProfile();
+    uint32_t now = millis();
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t sensor = profile.inputMappings[i].sensorIndex;
+        if (sensor >= profile.sensorCount || !m_sensors[sensor].active) continue;
+        for (uint8_t direction = 0; direction < 2; direction++) {
+            PointExpectation& expectation = direction == 0 ? m_expectDown[i] : m_expectUp[i];
+            TouchInputState& input = m_inputs[i];
+            portENTER_CRITICAL(&m_expectationMux);
+            bool matches = m_sensors[sensor].statusValid && (direction == 0
+                ? (input.currentTouched && input.debouncedTouched && !input.pressConsumed &&
+                   now - input.pressStartTime <= EXPECT_HELD_FRESH_MS)
+                : !input.debouncedTouched);
+            if (expectation.active && !expectation.pending && matches) {
+                // Claim once, retain until delivery succeeds. A later release
+                // or freshness expiry must not erase a touch already detected.
+                expectation.pending = true;
+                if (direction == 0) input.pressConsumed = true;
             }
+            PointExpectation snapshot = expectation;
+            portEXIT_CRITICAL(&m_expectationMux);
+            if (!snapshot.active || !snapshot.pending) continue;
+
+            char position[POSITION_STRING_LENGTH];
+            CommandController::indexToPosition(i, position);
+            // EventQueue can wait for a mutex: NEVER call it in a critical section.
+            bool queued = direction == 0
+                ? m_eventQueue->queueTouched(position, snapshot.commandId)
+                : m_eventQueue->queueTouchReleased(position, snapshot.commandId);
+            if (!queued) continue;
+            portENTER_CRITICAL(&m_expectationMux);
+            if (expectation.revision == snapshot.revision) {
+                expectation.active = false;
+                expectation.pending = false;
+            }
+            portEXIT_CRITICAL(&m_expectationMux);
         }
     }
 }
@@ -679,22 +698,39 @@ void TouchController::recordPressEdge(uint32_t now) {
     }
 }
 
-void TouchController::fireExpectAny(uint8_t inputIndex) {
-    if (!m_eventQueue) return;
-    if (m_expectAnyTail == m_expectAnyHead) return;  // queue empty
-
+bool TouchController::fireExpectAny(uint8_t inputIndex) {
+    if (!m_eventQueue) return false;
+    bool claimed = false;
+    portENTER_CRITICAL(&m_expectationMux);
     ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
-    if (!head.active || m_inputs[inputIndex].pressConsumed) return;
-    if (head.excludeMask.test(inputIndex)) return;  // EXPECT_ANY_EXCEPT
+    if (!m_pendingAnyTouch.active && m_expectAnyTail != m_expectAnyHead &&
+        head.active && !m_inputs[inputIndex].pressConsumed && !head.excludeMask.test(inputIndex)) {
+        m_inputs[inputIndex].pressConsumed = true;
+        m_pendingAnyInput = inputIndex;
+        m_pendingAnyTouch.commandId = head.commandId;
+        m_pendingAnyTouch.revision++;
+        m_pendingAnyTouch.active = true;
+        head.active = false;
+        m_expectAnyTail = (uint8_t)((m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE);
+        claimed = true;
+    }
+    portEXIT_CRITICAL(&m_expectationMux);
+    return claimed;
+}
 
-    char posStr[POSITION_STRING_LENGTH];
-    CommandController::indexToPosition(inputIndex, posStr);
-    m_inputs[inputIndex].pressConsumed = true;
-    m_eventQueue->queueTouched(posStr, head.commandId);
-
-    head.active = false;
-    head.commandId = COMMAND_ID_NONE;
-    m_expectAnyTail = (uint8_t)((m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE);
+void TouchController::processPendingAnyTouch() {
+    if (!m_eventQueue) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    PointExpectation snapshot = m_pendingAnyTouch;
+    uint8_t input = m_pendingAnyInput;
+    portEXIT_CRITICAL(&m_expectationMux);
+    if (!snapshot.active) return;
+    char position[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(input, position);
+    if (!m_eventQueue->queueTouched(position, snapshot.commandId)) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    if (m_pendingAnyTouch.revision == snapshot.revision) m_pendingAnyTouch.active = false;
+    portEXIT_CRITICAL(&m_expectationMux);
 }
 
 void TouchController::processExpectAnyQualification() {
@@ -744,15 +780,15 @@ void TouchController::processExpectAnyQualification() {
         // PENDING while the grab is still fresh - it fires on the tick
         // after the next EXPECT_ANY is queued. Without this the second
         // simultaneous touch would never be reported (no new press edge).
-        if (m_expectAnyTail == m_expectAnyHead) {
-            continue;
-        }
-
         // An excluded hold may become eligible for the NEXT expectation.
         // Keep qualifying it while fresh, rather than silently discarding it
         // when fireExpectAny() refuses the current queue head's exclusion.
-        const ExpectState& expectation = m_expectAnyQueue[m_expectAnyTail];
-        if (!expectation.active || expectation.excludeMask.test(i)) {
+        portENTER_CRITICAL(&m_expectationMux);
+        bool eligible = !m_pendingAnyTouch.active && m_expectAnyTail != m_expectAnyHead &&
+            m_expectAnyQueue[m_expectAnyTail].active &&
+            !m_expectAnyQueue[m_expectAnyTail].excludeMask.test(i);
+        portEXIT_CRITICAL(&m_expectationMux);
+        if (!eligible) {
             continue;
         }
 
@@ -763,8 +799,7 @@ void TouchController::processExpectAnyQualification() {
                         (uint32_t)c.deltaSamples * EXPECT_ANY_DELTA_GOOD_PCT);
 
         if (deltaOk && m_inputs[i].currentTouched) {
-            fireExpectAny(i);
-            c.active = false;
+            if (fireExpectAny(i)) c.active = false;
         } else if (m_inputs[i].currentTouched) {
             // Still in contact but delta was not consistently grab-like yet
             // (e.g. hand still settling onto the hold). Restart the window

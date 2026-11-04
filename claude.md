@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.2.3` |
+| `FIRMWARE_VERSION` | `1.2.4` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -93,9 +93,11 @@ Sequenzboard repo.
 | **Core 0** | `touchPollingTask` → `TouchController::tick()` every 5 ms (`vTaskDelayUntil`) | ALL I²C traffic |
 | **Core 1** | Arduino `loop()` | Serial RX/TX, command execution, ALL NeoPixel writes |
 
-The **only cross-core channel is the `EventQueue`** (FreeRTOS-mutex-protected,
-64 slots). Touch code on Core 0 must never call `LedController` or write to
-`Serial` directly.
+Outgoing cross-core events use the **`EventQueue`** (FreeRTOS-mutex-protected,
+64 slots). Command-side expectation registration shares a short
+`m_expectationMux` critical section with the polling core; no I²C or event
+enqueue operation may run inside that critical section. Touch code on Core 0
+must never call `LedController` or write to `Serial` directly.
 
 ```
 loop():                                        // Core 1
@@ -182,10 +184,25 @@ the freshness window and alternating two-hold sequences ping-ponged instantly
 Both expectation types now use this same flag; there is no separate
 queue-batch used mask to accidentally prevent reuse after a genuine release.
 
-**Already-held EXPECT:** `setExpectDown()` fires `TOUCHED` immediately only if
-`debouncedTouched && !pressConsumed && (now - pressStartTime) <= EXPECT_HELD_FRESH_MS`
-(2 s). Covers the race where the player grabs the hold just before the Pi's
-`EXPECT` arrives.
+**Single-hold expectations (since 1.2.4):** `setExpectDown()` and
+`setExpectUp()` atomically publish a request; `processPointExpectations()`
+evaluates it on every sensor tick, not only on edges. An already-held EXPECT
+fires within one poll only if its status read is valid,
+`currentTouched && debouncedTouched && !pressConsumed` and the press is at most
+`EXPECT_HELD_FRESH_MS` (2 s) old. A raw-untouched hold still inside the release
+latch cannot satisfy a new EXPECT. EXPECT_RELEASE likewise handles an already
+debounced-released input on the next valid poll. This removes the old
+check-then-arm race between command registration and a press on the other core.
+
+**Reliable touch reports:** a matched EXPECT/EXPECT_RELEASE is retained as a
+pending report until `EventQueue` accepts it; a qualified EXPECT_ANY similarly
+reserves its expectation and retains one pending report while further candidates
+wait. Queue-full or queue-mutex timeouts do not silently consume/drop the event.
+A claimed grab stays consumed to avoid duplicate reports, even if delivery is
+delayed beyond release or freshness expiry. Per-request revision counters keep
+completion of an old delivery from clearing a concurrently rearmed command,
+including commands without ids. Replacing/clearing an expectation cancels its
+undelivered point report; `CLEAN_QUEUE` also drops pending ANY reports.
 
 **EXPECT_ANY qualification (brush-by rejection):** `EXPECT <pos>` is instant
 (only the armed hold can fire), but `EXPECT_ANY` arms every hold, so a new
@@ -299,8 +316,8 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 
 | Command | Reply | Behavior |
 |---|---|---|
-| `EXPECT <pos> [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | One-shot press detection. Fires immediately for an already-held input only if fresh (≤2 s) AND not yet consumed (§2.5) |
-| `EXPECT_RELEASE <pos> [#id]` | `ACK`, later `TOUCH_RELEASED <pos> [#id]` | One-shot release; fires immediately if already released |
+| `EXPECT <pos> [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | One-shot press detection. Evaluated each poll; an already-held input must have valid raw contact, be fresh (≤2 s) AND not yet consumed (§2.5). Matched reports retry on outgoing queue pressure |
+| `EXPECT_RELEASE <pos> [#id]` | `ACK`, later `TOUCH_RELEASED <pos> [#id]` | One-shot release; an already-released input reports on the next valid poll. Matched reports retry on outgoing queue pressure |
 | `EXPECT_ANY [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | First *qualified* new touch anywhere; queued (max 8 concurrent) |
 | `EXPECT_ANY_EXCEPT [<pos> ...] [#id]` | like `EXPECT_ANY` | Listed positions excluded |
 | `CLEAN_QUEUE [#id]` | `ACK` | Clears ALL expectations + EXPECT_ANY queue, disables hands-off detection |
@@ -316,7 +333,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.2.3 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.2.4 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -517,8 +534,10 @@ app) as the release asset.
 
 ## 6.2 Concurrency
 
-- Core 0 = touch/I²C only; Core 1 = serial/LED only. `EventQueue` is the only
-  cross-core path. Never call `LedController` or `Serial` from the touch task.
+- Core 0 = touch/I²C only; Core 1 = serial/LED only. Outgoing events cross via
+  `EventQueue`; expectation requests share `m_expectationMux`. Never hold that
+  critical section across I²C or EventQueue calls. Never call `LedController`
+  or `Serial` from the touch task.
 - Never block: no `delay()` outside `setup()`/startup. Animations advance via
   overflow-safe `millis()` checks (`now - last >= interval`).
 
@@ -584,6 +603,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.2.4 | Fix missed single-hold touches at sequence start/mid-sequence: evaluate EXPECT/EXPECT_RELEASE on every sensor tick with synchronized registration instead of a command-side check-then-arm race; do not accept raw-untouched release-latched holds. Retain matched touch/release and qualified EXPECT_ANY reports across event queue rejection, with revision-safe completion and CLEAN_QUEUE cancellation. Preserve single-consumption, 2 s freshness, 500 ms release latch, protocol grammar and ids. Add event-delivery and expectation lifecycle regressions |
 | 1.2.3 | Fix missed touches during hold handoffs: qualify fresh grabs across EXPECT_ANY rearm gaps, recover unconsumed candidates after raw dropouts, retain fresh excluded candidates for later expectations, and share `pressConsumed` between EXPECT and EXPECT_ANY instead of a batch-wide used mask. Missing I²C status reads no longer confirm releases. Preserve the working-tree 500 ms release latch. Correct CAP1188 channel ceiling to 8 so v2 H32/CS8 is enabled. Native touch-controller regression tests; protocol grammar and ids unchanged |
 | 1.2.0 | Snake support. New `TRACK` (reports the LED track: both strips chained, strip 2 backwards then strip 1, plus every hold's track index), `SNAKE <start> <len> [r,g,b]` (free track span as an overlay on top of the positions) and `SNAKE_OFF`; `HIDE_ALL` also clears the overlay. `INFO` gains `features=snake`. Track math in the pure `SnakeTrack.h`, host-tested |
 | 1.1.3 | Default CAP1188 sensitivity changed 3 → 2 (`CAP1188_DEFAULT_SENSITIVITY`, more sensitive) |

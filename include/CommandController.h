@@ -24,10 +24,10 @@
  *   SNAKE_OFF [#id]               - Remove the snake overlay (HIDE_ALL does too)
  * 
  * Touch Commands:
- *   EXPECT <pos> [#id]            - Wait for touch
+ *   EXPECT <pos> [#id]            - Wait for fresh unconsumed touch; evaluated each poll
  *   EXPECT_ANY [#id]              - First qualified, fresh, unconsumed grab (also across rearm gaps)
  *   EXPECT_ANY_EXCEPT [<pos>...] [#id] - Wait for any touch except the listed positions
- *   EXPECT_RELEASE <pos> [#id]    - Wait for release
+ *   EXPECT_RELEASE <pos> [#id]    - Wait for debounced release; reports retry on queue pressure
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value

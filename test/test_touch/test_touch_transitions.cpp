@@ -19,6 +19,8 @@ TwoWire Wire;
 static uint32_t g_now;
 static Event g_events[64];
 static uint8_t g_count;
+static bool g_rejectEvents;
+static void (*g_afterCapture)();
 static TouchController g_touch;
 static EventQueue g_queue;
 
@@ -32,12 +34,18 @@ EventQueue::EventQueue() : m_head(0), m_tail(0), m_count(0),
 EventQueue::~EventQueue() {}
 
 static bool capture(EventType type, const char* position, uint32_t id) {
+    if (g_rejectEvents) return false;
     if (g_count >= 64) return false;
     Event& event = g_events[g_count++];
     event = {};
     event.type = type;
     event.commandId = id;
     if (position) snprintf(event.position, sizeof(event.position), "%s", position);
+    if (g_afterCapture) {
+        auto callback = g_afterCapture;
+        g_afterCapture = nullptr;
+        callback();
+    }
     return true;
 }
 bool EventQueue::queueTouched(const char* position, uint32_t id) {
@@ -81,6 +89,8 @@ void setUp() {
     Wire = TwoWire{};
     g_now = 1000;
     g_count = 0;
+    g_rejectEvents = false;
+    g_afterCapture = nullptr;
     g_touch = TouchController{};
     g_touch.setEventQueue(&g_queue);
     for (uint8_t s = 0; s < activeBoardProfile().sensorCount; s++) {
@@ -275,6 +285,139 @@ void test_release_and_next_press_work_across_millis_wrap() {
     expectEvent(2, EventType::TOUCHED, 142, "H02");
 }
 
+void test_already_held_expect_retries_rejected_delivery() {
+    contact(0, true);
+    advance(20);
+    g_rejectEvents = true;
+    g_touch.setExpectDown(0, 150);
+    advance(20);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+    g_rejectEvents = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 150, "H01");
+    advance(100);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+}
+
+void test_press_report_survives_queue_pressure_and_release() {
+    g_touch.setExpectDown(0, 160);
+    g_rejectEvents = true;
+    contact(0, true);
+    advance(10);
+    contact(0, false);
+    advance(EXPECT_HELD_FRESH_MS + TOUCH_DEBOUNCE_RELEASE_MS);
+    g_rejectEvents = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 160, "H01");
+}
+
+void test_release_report_survives_queue_pressure_and_regrab() {
+    contact(0, true);
+    advance(10);
+    g_touch.setExpectUp(0, 170);
+    g_rejectEvents = true;
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 10);
+    contact(0, true);
+    advance(10);
+    g_rejectEvents = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCH_RELEASED, 170, "H01");
+}
+
+void test_expect_does_not_count_a_release_latched_hold() {
+    contact(0, true);
+    advance(10);
+    contact(0, false);
+    advance(10);
+    g_touch.setExpectDown(0, 180);
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS);
+    contact(0, true);
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 180, "H01");
+}
+
+void test_expect_any_retries_qualified_touch_after_queue_pressure() {
+    g_touch.setExpectAny(190);
+    g_rejectEvents = true;
+    contact(0, true);
+    advance(200);
+    contact(0, false);
+    advance(EXPECT_HELD_FRESH_MS + TOUCH_DEBOUNCE_RELEASE_MS);
+    g_rejectEvents = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 190, "H01");
+}
+
+void test_clean_queue_cancels_reports_waiting_for_delivery() {
+    g_touch.setExpectDown(0, 200);
+    g_touch.setExpectAny(201);
+    contact(0, true);
+    contact(1, true);
+    g_rejectEvents = true;
+    advance(200);
+    g_touch.clearAllExpectations();
+    g_rejectEvents = false;
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+}
+
+static void rearmDuringDelivery() { g_touch.setExpectDown(0, 211); }
+
+void test_rearming_during_delivery_does_not_erase_new_expectation() {
+    g_touch.setExpectDown(0, 210);
+    g_afterCapture = rearmDuringDelivery;
+    contact(0, true);
+    advance(10);
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 10);
+    contact(0, true);
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 210, "H01");
+    expectEvent(1, EventType::TOUCHED, 211, "H01");
+}
+
+void test_already_released_expect_retries_rejected_delivery() {
+    g_rejectEvents = true;
+    g_touch.setExpectUp(0, 220);
+    advance(10);
+    g_rejectEvents = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCH_RELEASED, 220, "H01");
+}
+
+void test_new_expect_waits_for_a_valid_sensor_status() {
+    contact(0, true);
+    advance(10);
+    uint8_t address = activeBoardProfile().sensorAddresses[activeBoardProfile().inputMappings[0].sensorIndex];
+    Wire.failStatus[address] = true;
+    advance(10);
+    g_touch.setExpectDown(0, 230);
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+    Wire.failStatus[address] = false;
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 230, "H01");
+}
+
+void test_stale_or_consumed_holds_do_not_complete_new_expect() {
+    contact(0, true);
+    advance(EXPECT_HELD_FRESH_MS + 10);
+    g_touch.setExpectDown(0, 240);
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 10);
+    contact(0, true);
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 240, "H01");
+    g_touch.setExpectDown(0, 241);
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_next_hold_grabbed_before_expect_any_is_not_lost);
@@ -291,6 +434,16 @@ int main() {
     RUN_TEST(test_handoff_preserves_occupancy_until_last_hold_releases);
     RUN_TEST(test_two_simultaneous_grabs_are_delivered_across_rearming);
     RUN_TEST(test_release_and_next_press_work_across_millis_wrap);
+    RUN_TEST(test_already_held_expect_retries_rejected_delivery);
+    RUN_TEST(test_press_report_survives_queue_pressure_and_release);
+    RUN_TEST(test_release_report_survives_queue_pressure_and_regrab);
+    RUN_TEST(test_expect_does_not_count_a_release_latched_hold);
+    RUN_TEST(test_expect_any_retries_qualified_touch_after_queue_pressure);
+    RUN_TEST(test_clean_queue_cancels_reports_waiting_for_delivery);
+    RUN_TEST(test_rearming_during_delivery_does_not_erase_new_expectation);
+    RUN_TEST(test_already_released_expect_retries_rejected_delivery);
+    RUN_TEST(test_new_expect_waits_for_a_valid_sensor_status);
+    RUN_TEST(test_stale_or_consumed_holds_do_not_complete_new_expect);
     return UNITY_END();
 }
 

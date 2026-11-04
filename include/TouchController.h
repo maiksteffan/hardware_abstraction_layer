@@ -17,6 +17,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include <freertos/FreeRTOS.h>
 #include "Config.h"
 
 class EventQueue;
@@ -48,6 +49,15 @@ struct ExpectState {
     bool active;
     uint32_t commandId;
     HoldMask excludeMask;  // EXPECT_ANY_EXCEPT only: bit i set => input i is excluded
+};
+
+// Published by the command core, claimed/retried by the touch core. Revision
+// prevents completion of an old event from erasing a concurrently rearmed one.
+struct PointExpectation {
+    bool active;
+    bool pending;
+    uint32_t commandId;
+    uint32_t revision;
 };
 
 // Qualification state for one EXPECT_ANY touch candidate (brush-by filter).
@@ -85,7 +95,9 @@ public:
     // physical sensor.
     bool setSensitivity(uint8_t inputIndex, uint8_t level);
     
-    // Expectations (indexed by input 0..holdCount-1)
+    // Expectations (indexed by input 0..holdCount-1). Point setters publish a
+    // request; polling evaluates it within one tick, including already-held /
+    // released inputs. Confirmed events persist across outgoing queue pressure.
     void setExpectDown(uint8_t inputIndex, uint32_t commandId);
     void setExpectUp(uint8_t inputIndex, uint32_t commandId);
     void setExpectAny(uint32_t commandId);
@@ -133,8 +145,11 @@ private:
     // at runtime. Loops and bounds checks use activeBoardProfile().
     PhysicalSensor m_sensors[MAX_SENSORS];
     TouchInputState m_inputs[MAX_HOLDS];
-    ExpectState m_expectDown[MAX_HOLDS];
-    ExpectState m_expectUp[MAX_HOLDS];
+    portMUX_TYPE m_expectationMux = portMUX_INITIALIZER_UNLOCKED;
+    PointExpectation m_expectDown[MAX_HOLDS];
+    PointExpectation m_expectUp[MAX_HOLDS];
+    PointExpectation m_pendingAnyTouch;
+    uint8_t m_pendingAnyInput;
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
@@ -152,10 +167,12 @@ private:
     bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
     void pollSensors();
     void processDebounce();
+    void processPointExpectations();  // Claim states and retry rejected events every tick
+    void processPendingAnyTouch();    // Retry an already-qualified EXPECT_ANY event
     void processExpectAnyQualification();  // Advance/finish EXPECT_ANY candidates
     void startAnyCandidate(uint8_t inputIndex, uint32_t now);
     void recordPressEdge(uint32_t now);    // Sweep detection bookkeeping
-    void fireExpectAny(uint8_t inputIndex);  // Consume queue head & emit TOUCHED
+    bool fireExpectAny(uint8_t inputIndex);  // Claim queue head for reliable TOUCHED delivery
     void processHandsOffDetection();
     bool anyInputTouched() const;
 };
