@@ -51,9 +51,11 @@ struct ExpectState {
 };
 
 // Qualification state for one EXPECT_ANY touch candidate (brush-by filter).
-// A candidate is opened on a press edge and must survive a confirmation
-// window (persistence + delta consistency + sweep plausibility) before the
-// touch is reported through the EXPECT_ANY queue. See Config.h section 6b.
+// Every press opens a candidate, even between expectations. Unconsumed grabs
+// can restart qualification after a brief raw dropout during the release latch.
+// Persistence + delta consistency + sweep plausibility must pass before an
+// eligible EXPECT_ANY receives it; pending candidates expire after 2 seconds.
+// See Config.h section 6b.
 struct AnyCandidate {
     bool active;
     uint32_t startTime;         // Window start (millis)
@@ -136,7 +138,6 @@ private:
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
-    bool m_expectAnyUsed[MAX_HOLDS];  // Inputs already reported by EXPECT_ANY
     AnyCandidate m_anyCandidates[MAX_HOLDS];          // EXPECT_ANY qualification state
     uint32_t m_pressEdgeRing[EXPECT_ANY_EDGE_RING_SIZE];  // Recent press-edge timestamps
     uint8_t m_pressEdgeRingPos;

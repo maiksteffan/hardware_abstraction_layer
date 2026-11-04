@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.2.0` |
+| `FIRMWARE_VERSION` | `1.2.3` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -60,7 +60,7 @@ Current versions ([include/Config.h](include/Config.h)):
 |---|---|
 | MCU | ESP32-S3-DevKitC-1-N8R8 (8 MB flash, 8 MB PSRAM), serial over native USB-CDC |
 | LED strips | 2× WS2812/NeoPixel, 260 LEDs each, data on GPIO 18 / GPIO 17 |
-| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, 7 channels used per chip |
+| Touch | 5× CAP1188 (I²C addresses 0x28–0x2C), SDA=GPIO7, SCL=GPIO6, up to 8 channels per chip as selected by the profile (v2 H32 uses CS8) |
 | Legacy board | classic ESP32 WROOM still buildable via `pio run -e esp32dev` (pins overridden by build flags) |
 
 ### Board profiles
@@ -167,8 +167,11 @@ Runs on Core 0 every 5 ms:
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
 **Debounce (asymmetric):** press is instant (`TOUCH_DEBOUNCE_PRESS_MS` = 0);
-release is latched `TOUCH_DEBOUNCE_RELEASE_MS` = 800 ms — transient
-re-contacts keep the touch held.
+release is latched `TOUCH_DEBOUNCE_RELEASE_MS` = 500 ms — transient
+re-contacts keep the touch held. Release timers are per hold, so releasing
+one hold never blocks another hold's press. Failed status reads restart the
+release timer and cannot confirm a release from stale cached state. A consumed
+hold still needs the full release latch before re-grabbing it can count again.
 
 **Single-consumption rule (`pressConsumed`, critical fix in v1.0.4):** each
 debounced press edge may satisfy **exactly one** `EXPECT`/`EXPECT_ANY`. Set
@@ -176,6 +179,8 @@ when a `TOUCHED` is reported, cleared only on genuine release + re-grab.
 Without it, a continuously held hold satisfied every re-armed `EXPECT` within
 the freshness window and alternating two-hold sequences ping-ponged instantly
 (false double touches). **Preserve this invariant in any refactor.**
+Both expectation types now use this same flag; there is no separate
+queue-batch used mask to accidentally prevent reuse after a genuine release.
 
 **Already-held EXPECT:** `setExpectDown()` fires `TOUCHED` immediately only if
 `debouncedTouched && !pressConsumed && (now - pressStartTime) <= EXPECT_HELD_FRESH_MS`
@@ -188,13 +193,19 @@ press must survive a 150 ms confirmation window (`AnyCandidate`):
 persistence (≥3 consecutive untouched samples cancels), delta consistency
 (≥70 % of samples with CAP1188 delta ≥ 48; degrades gracefully on I²C
 failures), and sweep plausibility (≥3 press edges in 500 ms = arm sweeping
-across the wall → all decisions deferred 400 ms). Qualified candidates whose
-queue is momentarily empty stay pending while fresh so the second of two
-simultaneous grabs is still reported when the next `EXPECT_ANY` arrives.
+across the wall → all decisions deferred 400 ms). Every press opens a candidate,
+even while no expectation is queued, so a new hold grabbed during a Pi rearm
+gap is not lost. Fresh candidates stay pending when the queue is empty or the
+current expectation excludes their hold, and can satisfy a later eligible
+expectation within `EXPECT_HELD_FRESH_MS` (2 s from the original press).
+After a raw dropout cancels qualification, re-contact during the release latch
+restarts it only for fresh, unconsumed grabs; consumed grabs never fire twice.
+`CLEAN_QUEUE` still discards all pending candidates. No event is emitted without
+an eligible expectation, and status-read failures cannot qualify cached contact.
 
 **Hands-off detection:** while enabled, emits `HANDS_ON`/`HANDS_OFF` on
 board-occupancy transitions; enabling reports the current state immediately.
-The 800 ms release latch means `HANDS_OFF` lags the last release by ~0.8 s.
+The 500 ms release latch means `HANDS_OFF` lags the last release by ~0.5 s.
 Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
 
 ## 2.6 LED system
@@ -237,7 +248,7 @@ pio run                      # build (default env)
 pio run -t upload            # flash over USB
 pio device monitor           # 115200 baud serial monitor
 pio run -e esp32dev          # legacy WROOM board
-pio test -e native           # host tests: board profiles, INFO line, track math
+pio test -e native           # host tests: profiles, INFO, track math, touch transitions
 ```
 
 `pio` may not be on PATH → use `~/.platformio/penv/bin/pio`.
@@ -305,7 +316,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.2.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1 default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.2.3 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -440,7 +451,7 @@ mode: every hold is armed, so brush-bys during reaching must be filtered.
 
 - Arms `HANDSOFF_DETECTION_ON` after the **second** `TOUCHED` of a turn.
 - On `HANDS_OFF`: starts a ~1.2 s Pi-side grace timer (+ the firmware's
-  800 ms release latch ≈ 2 s total). If no `HANDS_ON` arrives in time, the
+  500 ms release latch ≈ 1.7 s total). If no `HANDS_ON` arrives in time, the
   turn is failed (`turn_failed {reason: "hands_off"}`).
 - After `CLEAN_QUEUE` (which disables detection firmware-side) the monitor
   re-asserts `HANDSOFF_DETECTION_ON`.
@@ -573,6 +584,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.2.3 | Fix missed touches during hold handoffs: qualify fresh grabs across EXPECT_ANY rearm gaps, recover unconsumed candidates after raw dropouts, retain fresh excluded candidates for later expectations, and share `pressConsumed` between EXPECT and EXPECT_ANY instead of a batch-wide used mask. Missing I²C status reads no longer confirm releases. Preserve the working-tree 500 ms release latch. Correct CAP1188 channel ceiling to 8 so v2 H32/CS8 is enabled. Native touch-controller regression tests; protocol grammar and ids unchanged |
 | 1.2.0 | Snake support. New `TRACK` (reports the LED track: both strips chained, strip 2 backwards then strip 1, plus every hold's track index), `SNAKE <start> <len> [r,g,b]` (free track span as an overlay on top of the positions) and `SNAKE_OFF`; `HIDE_ALL` also clears the overlay. `INFO` gains `features=snake`. Track math in the pure `SnakeTrack.h`, host-tested |
 | 1.1.3 | Default CAP1188 sensitivity changed 3 → 2 (`CAP1188_DEFAULT_SENSITIVITY`, more sensitive) |
 | 1.1.2 | LED data pins moved into the board profile (`ledPin1`/`ledPin2`). Two board builds on the same MCU do not share their LED wiring, so the pin could not stay in the per-MCU build flags: `dev-5hold` drives its single strip from GPIO25, and driving the WROOM default 19 left it dark, boot sweep included. That profile's holds now sit on STRIP1 — the strip that exists — with STRIP2 length 0 |

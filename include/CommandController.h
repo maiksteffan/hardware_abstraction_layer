@@ -25,7 +25,7 @@
  * 
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for touch
- *   EXPECT_ANY [#id]              - Wait for any touch (first touched position)
+ *   EXPECT_ANY [#id]              - First qualified, fresh, unconsumed grab (also across rearm gaps)
  *   EXPECT_ANY_EXCEPT [<pos>...] [#id] - Wait for any touch except the listed positions
  *   EXPECT_RELEASE <pos> [#id]    - Wait for release
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor

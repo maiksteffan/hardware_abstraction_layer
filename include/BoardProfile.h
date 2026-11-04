@@ -68,7 +68,7 @@ struct LedMirror {
 /// Which CAP1188 chip and channel a logical input hangs on.
 struct InputMapping {
     uint8_t sensorIndex;   // 0..sensorCount-1 (index into sensorAddresses)
-    uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1 (CAP1188 CS1..CS7)
+    uint8_t channel;       // 0..TOUCH_CHANNELS_PER_SENSOR-1 (CAP1188 CS1..CS8)
 };
 
 /// Bitset over logical inputs, used by EXPECT_ANY_EXCEPT.

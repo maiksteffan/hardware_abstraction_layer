@@ -49,6 +49,12 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 - **Touch intelligence:** asymmetric debouncing, one-shot expectations,
   single-consumption press edges (a held hold can't satisfy two EXPECTs),
   brush-by rejection for recording mode, hands-off/presence events.
+  Fresh grabs are tracked even between `EXPECT_ANY` commands, so releasing
+  one hold and grabbing the next before the Pi re-arms does not lose the
+  next touch. Unconsumed grabs recover from brief sensor dropouts without
+  requiring a full release. The release latch remains 500 ms; it does not
+  block another hold's touch. Reusing the **same** consumed hold still
+  requires a full debounced release and re-grab.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its
@@ -79,6 +85,10 @@ pio run -t upload      # flash over USB
 pio device monitor     # serial monitor (115200 baud)
 pio test -e native     # host tests, no hardware
 ```
+
+Native tests cover board profiles, track math and the real touch controller
+with simulated CAP1188 registers and time (handoffs, rearm gaps, dropouts,
+one-event-per-grab, exclusions, release timing and occupancy transitions).
 
 ## Updates in the field
 

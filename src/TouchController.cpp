@@ -60,7 +60,6 @@ TouchController::TouchController()
         m_expectAnyQueue[i].commandId = COMMAND_ID_NONE;
         m_expectAnyQueue[i].excludeMask.clear();
     }
-    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
     memset(m_pressEdgeRing, 0, sizeof(m_pressEdgeRing));
 }
@@ -260,7 +259,6 @@ void TouchController::clearExpectAny() {
     }
     m_expectAnyHead = 0;
     m_expectAnyTail = 0;
-    memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
     // Drop any in-flight qualification candidates as well.
     memset(m_anyCandidates, 0, sizeof(m_anyCandidates));
 }
@@ -545,12 +543,25 @@ void TouchController::pollSensors() {
         uint8_t s = profile.inputMappings[i].sensorIndex;
         uint8_t ch = profile.inputMappings[i].channel;
         if (s >= profile.sensorCount || !m_sensors[s].active) continue;
-        if (!m_sensors[s].statusValid) continue;  // I2C read failed this cycle
+        if (!m_sensors[s].statusValid) {
+            // Missing samples cannot prove a continuous release. Restart the
+            // latch instead of releasing from an old cached "untouched" bit.
+            m_inputs[i].lastChangeTime = now;
+            continue;
+        }
 
         bool touched = ((m_sensors[s].lastStatus >> ch) & 0x01) != 0;
 
         if (touched != m_inputs[i].currentTouched) {
             m_inputs[i].currentTouched = touched;
+            // A short dropout cancels EXPECT_ANY qualification well before
+            // the release latch expires. Resume qualification on re-contact
+            // without turning a consumed grab into a second press event.
+            if (touched && m_inputs[i].debouncedTouched &&
+                !m_inputs[i].pressConsumed &&
+                now - m_inputs[i].pressStartTime <= EXPECT_HELD_FRESH_MS) {
+                startAnyCandidate(i, now);
+            }
             // Only reset debounce timer if the new state differs from debounced state
             // (prevents noise from resetting the timer while holding a touch)
             if (touched != m_inputs[i].debouncedTouched) {
@@ -580,6 +591,7 @@ void TouchController::processDebounce() {
     for (uint8_t i = 0; i < profile.holdCount; i++) {
         uint8_t s = profile.inputMappings[i].sensorIndex;
         if (s >= profile.sensorCount || !m_sensors[s].active) continue;
+        if (!m_sensors[s].statusValid) continue;
 
         TouchInputState& input = m_inputs[i];
 
@@ -605,17 +617,11 @@ void TouchController::processDebounce() {
             input.pressConsumed = false;  // fresh press edge: may satisfy one EXPECT
             recordPressEdge(now);
 
-            // EXPECT_ANY: do NOT report immediately. Open a qualification
-            // window that rejects brush-by contacts; the touch is reported
-            // by processExpectAnyQualification() once it proves to be a
-            // sustained grab. (EXPECT <pos> below stays instant - with a
-            // single armed hold a false positive is impossible.)
-            if (m_expectAnyTail != m_expectAnyHead &&
-                m_expectAnyQueue[m_expectAnyTail].active &&
-                !m_expectAnyUsed[i])
-            {
-                startAnyCandidate(i, now);
-            }
+            // Track every new grab, even between Pi expectations. Otherwise
+            // releasing one hold and grabbing the next before re-arming loses
+            // that next press forever. No event is emitted until an eligible
+            // EXPECT_ANY exists and the normal brush-by checks have passed.
+            startAnyCandidate(i, now);
             if (m_expectDown[i].active) {
                 input.pressConsumed = true;
                 m_eventQueue->queueTouched(posStr, m_expectDown[i].commandId);
@@ -678,7 +684,7 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
     if (m_expectAnyTail == m_expectAnyHead) return;  // queue empty
 
     ExpectState& head = m_expectAnyQueue[m_expectAnyTail];
-    if (!head.active || m_expectAnyUsed[inputIndex]) return;
+    if (!head.active || m_inputs[inputIndex].pressConsumed) return;
     if (head.excludeMask.test(inputIndex)) return;  // EXPECT_ANY_EXCEPT
 
     char posStr[POSITION_STRING_LENGTH];
@@ -689,12 +695,6 @@ void TouchController::fireExpectAny(uint8_t inputIndex) {
     head.active = false;
     head.commandId = COMMAND_ID_NONE;
     m_expectAnyTail = (uint8_t)((m_expectAnyTail + 1) % EXPECT_ANY_QUEUE_SIZE);
-    m_expectAnyUsed[inputIndex] = true;
-
-    // Reset used mask when queue is empty
-    if (m_expectAnyTail == m_expectAnyHead) {
-        memset(m_expectAnyUsed, false, sizeof(m_expectAnyUsed));
-    }
 }
 
 void TouchController::processExpectAnyQualification() {
@@ -704,11 +704,18 @@ void TouchController::processExpectAnyQualification() {
         AnyCandidate& c = m_anyCandidates[i];
         if (!c.active) continue;
 
-        // Input already reported for the current EXPECT_ANY batch.
-        if (m_expectAnyTail != m_expectAnyHead && m_expectAnyUsed[i]) {
+        // EXPECT and EXPECT_ANY share ONE consumption flag for each press.
+        // Queue/batch membership must never block a released-and-regrabbed
+        // hold, nor allow an EXPECT touch to be reported a second time here.
+        if (m_inputs[i].pressConsumed ||
+            now - m_inputs[i].pressStartTime > EXPECT_HELD_FRESH_MS) {
             c.active = false;
             continue;
         }
+
+        uint8_t sensor = activeBoardProfile().inputMappings[i].sensorIndex;
+        if (sensor >= activeBoardProfile().sensorCount ||
+            !m_sensors[sensor].statusValid) continue;
 
         // ---- 1. Persistence: raw contact must not drop out ----
         if (m_inputs[i].currentTouched) {
@@ -738,9 +745,14 @@ void TouchController::processExpectAnyQualification() {
         // after the next EXPECT_ANY is queued. Without this the second
         // simultaneous touch would never be reported (no new press edge).
         if (m_expectAnyTail == m_expectAnyHead) {
-            if (now - m_inputs[i].pressStartTime > EXPECT_HELD_FRESH_MS) {
-                c.active = false;  // stale - require a fresh re-grab
-            }
+            continue;
+        }
+
+        // An excluded hold may become eligible for the NEXT expectation.
+        // Keep qualifying it while fresh, rather than silently discarding it
+        // when fireExpectAny() refuses the current queue head's exclusion.
+        const ExpectState& expectation = m_expectAnyQueue[m_expectAnyTail];
+        if (!expectation.active || expectation.excludeMask.test(i)) {
             continue;
         }
 
