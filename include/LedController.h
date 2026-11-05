@@ -29,7 +29,8 @@ enum class PositionState : uint8_t {
     ANIMATING,
     EXPANDED,
     CONTRACTING,
-    BLINKING
+    BLINKING,
+    GAUGE
 };
 
 struct PositionData {
@@ -38,6 +39,9 @@ struct PositionData {
     uint32_t lastAnimationTime;
     bool blinkOn;
     uint8_t expansionRadius;  // Current expansion radius for EXPAND_STEP/CONTRACT_STEP
+    // GAUGE only: how far out the green block still reaches, in physical LEDs
+    // from the center (0 = just the center LED). See holdGauge().
+    uint8_t gaugeLevel;
     // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
     // a red core and a finished CONTRACT a green one, and repaintPosition()
     // has to restore the right one after the snake passed over it.
@@ -66,6 +70,11 @@ public:
     bool stopBlink(uint8_t position);
     bool expandStep(uint8_t position);
     bool contractStep(uint8_t position);
+    // Green block scaled to <percent> of its full width, as a progress gauge:
+    // the Pi drives it down while a hold must stay gripped. Absolute, so a
+    // lost command is corrected by the next one. 100 = the full SUCCESS block,
+    // 0 = the center LED alone (the hold never goes dark while it is active).
+    bool holdGauge(uint8_t position, uint8_t percent);
     
     // Sequence animation
     void startSequenceCompletedAnimation();
@@ -140,6 +149,14 @@ private:
     void setLed(StripId strip, int16_t index, uint8_t r, uint8_t g, uint8_t b);
     void clearExpandedRegion(uint8_t position, const LedMapping* mapping);
     void setCoreColor(uint8_t position, uint8_t r, uint8_t g, uint8_t b);
+    // Widest the green block reaches, in physical LEDs from the center: the
+    // core's half width plus the success expansion rings.
+    uint8_t gaugeMaxLevel() const;
+    // Paint one physical LED of a position (and its mirror) at a distance from
+    // the center. Unlike paint(), this addresses LEDs inside the core too,
+    // which the gauge needs to shrink below the core's width.
+    void paintGaugeLed(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b);
+    void paintGauge(uint8_t position, uint8_t level);
     // Repaint a position from its state alone (static states; a running
     // expansion is drawn at its current step). Used to restore what the
     // snake covered.

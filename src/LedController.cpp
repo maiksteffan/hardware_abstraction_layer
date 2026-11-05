@@ -8,6 +8,7 @@
  */
 
 #include "LedController.h"
+#include "HoldGauge.h"
 #include "SnakeTrack.h"
 
 // ============================================================================
@@ -70,6 +71,7 @@ void LedController::begin() {
         m_positions[i].lastAnimationTime = 0;
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
+        m_positions[i].gaugeLevel = 0;
         setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     }
     
@@ -127,6 +129,7 @@ bool LedController::show(uint8_t position) {
     
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
+        m_positions[position].state == PositionState::GAUGE ||
         m_positions[position].expansionRadius > 0) {
         clearExpandedRegion(position, mapping);
     }
@@ -134,6 +137,7 @@ bool LedController::show(uint8_t position) {
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
     m_positions[position].expansionRadius = 0;
+    m_positions[position].gaugeLevel = 0;
     setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     
     paint(position, 0, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
@@ -184,7 +188,8 @@ bool LedController::success(uint8_t position) {
     
     // If this position was already animating/expanded, clear its old region first
     if (m_positions[position].state == PositionState::ANIMATING ||
-        m_positions[position].state == PositionState::EXPANDED) {
+        m_positions[position].state == PositionState::EXPANDED ||
+        m_positions[position].state == PositionState::GAUGE) {
         clearExpandedRegion(position, mapping);
     } else if (m_positions[position].state == PositionState::SHOWN ||
                m_positions[position].state == PositionState::BLINKING) {
@@ -210,12 +215,14 @@ bool LedController::fail(uint8_t position) {
     if (!mapping) return false;
     
     if (m_positions[position].state == PositionState::ANIMATING ||
-        m_positions[position].state == PositionState::EXPANDED) {
+        m_positions[position].state == PositionState::EXPANDED ||
+        m_positions[position].state == PositionState::GAUGE) {
         clearExpandedRegion(position, mapping);
     }
     
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
+    m_positions[position].gaugeLevel = 0;
     setCoreColor(position, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
     
     paint(position, 0, COLOR_FAIL_R, COLOR_FAIL_G, COLOR_FAIL_B);
@@ -344,6 +351,54 @@ bool LedController::contractStep(uint8_t position) {
         // Center LED remains on, state stays SHOWN
     }
     
+    m_needsUpdate = true;
+    return true;
+}
+
+uint8_t LedController::gaugeMaxLevel() const {
+    return holdGaugeMaxLevel(activeBoardProfile().ledPositionWidth, LED_SUCCESS_EXPANSION_RADIUS);
+}
+
+void LedController::paintGaugeLed(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b) {
+    const LedMapping* mapping = getMapping(position);
+    if (!mapping) return;
+
+    setLed(mapping->strip, (int16_t)mapping->index + offset, r, g, b);
+    const LedMirror* mirror = getMirror(position);
+    if (mirror) setLed(mirror->strip, (int16_t)mirror->index + offset, r, g, b);
+}
+
+void LedController::paintGauge(uint8_t position, uint8_t level) {
+    const uint8_t maxLevel = gaugeMaxLevel();
+    for (int16_t offset = -(int16_t)maxLevel; offset <= (int16_t)maxLevel; offset++) {
+        const int16_t distance = (offset < 0) ? -offset : offset;
+        if (distance <= (int16_t)level) {
+            paintGaugeLed(position, offset, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+        } else {
+            paintGaugeLed(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+        }
+    }
+}
+
+bool LedController::holdGauge(uint8_t position, uint8_t percent) {
+    if (position >= activeBoardProfile().holdCount) return false;
+
+    const LedMapping* mapping = getMapping(position);
+    if (!mapping) return false;
+
+    const uint8_t level = holdGaugeLevel(percent, activeBoardProfile().ledPositionWidth,
+                                        LED_SUCCESS_EXPANSION_RADIUS);
+
+    m_positions[position].state = PositionState::GAUGE;
+    m_positions[position].animationStep = 0;
+    m_positions[position].expansionRadius = 0;
+    m_positions[position].blinkOn = false;
+    m_positions[position].gaugeLevel = level;
+    // A snake crossing the hold repaints from the core color, and a gauge is
+    // green whatever the position showed before it.
+    setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+
+    paintGauge(position, level);
     m_needsUpdate = true;
     return true;
 }
@@ -501,6 +556,9 @@ bool LedController::positionTouchesTrackSpan(uint8_t position, uint16_t start, u
         case PositionState::ANIMATING:
         case PositionState::EXPANDED:
         case PositionState::CONTRACTING:
+        case PositionState::GAUGE:
+            // A shrunken gauge covers less, but reporting the full block only
+            // costs a repaint of LEDs that are already dark.
             reach += LED_SUCCESS_EXPANSION_RADIUS;
             break;
         default:
@@ -543,6 +601,11 @@ void LedController::repaintPosition(uint8_t position) {
 
         case PositionState::BLINKING:
             if (data.blinkOn) paint(position, 0, COLOR_BLINK_R, COLOR_BLINK_G, COLOR_BLINK_B);
+            return;
+
+        case PositionState::GAUGE:
+            // Drawn per LED, not per ring: a gauge shrinks inside the core too.
+            paintGauge(position, data.gaugeLevel);
             return;
 
         case PositionState::EXPANDED:

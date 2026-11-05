@@ -262,25 +262,27 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         }
     }
     
-    // Parse extra numeric value if needed (e.g., sensitivity level)
-    if (cmd.action == CommandAction::SET_SENSITIVITY) {
+    // Parse extra numeric value if needed (sensitivity level, gauge percent)
+    if (cmd.action == CommandAction::SET_SENSITIVITY || cmd.action == CommandAction::HOLD_GAUGE) {
         if (*p == '\0' || *p == '#') {
             m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
             return false;
         }
         
-        uint8_t val = 0;
+        const uint8_t maxValue = (cmd.action == CommandAction::HOLD_GAUGE) ? 100 : 7;
+        uint16_t val = 0;
         while (*p >= '0' && *p <= '9') {
-            val = val * 10 + (*p - '0');
+            val = val * 10 + (uint16_t)(*p - '0');
+            if (val > 255) val = 255;  // saturate instead of wrapping into range
             p++;
         }
         
-        if (val > 7) {
+        if (val > maxValue) {
             m_eventQueue.queueError("invalid_level", COMMAND_ID_NONE);
             return false;
         }
         
-        cmd.extraValue = val;
+        cmd.extraValue = (uint8_t)val;
         p = skipWhitespace(p);
     }
     
@@ -310,6 +312,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "STOP_BLINK", len)) return CommandAction::STOP_BLINK;
     if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
+    if (strcasecmpN(str, "HOLD_GAUGE", len)) return CommandAction::HOLD_GAUGE;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
     if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
     if (strcasecmpN(str, "EXPECT_ANY", len)) return CommandAction::EXPECT_ANY;
@@ -347,6 +350,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::STOP_BLINK: return "STOP_BLINK";
         case CommandAction::EXPAND_STEP: return "EXPAND_STEP";
         case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
+        case CommandAction::HOLD_GAUGE: return "HOLD_GAUGE";
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
         case CommandAction::EXPECT_ANY: return "EXPECT_ANY";
@@ -384,6 +388,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::STOP_BLINK:
         case CommandAction::EXPAND_STEP:
         case CommandAction::CONTRACT_STEP:
+        case CommandAction::HOLD_GAUGE:
         case CommandAction::EXPECT:
         case CommandAction::EXPECT_RELEASE:
         case CommandAction::RECALIBRATE:
@@ -489,6 +494,14 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             
         case CommandAction::CONTRACT_STEP:
             if (m_ledController.contractStep(cmd.positionIndex)) {
+                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+            } else {
+                m_eventQueue.queueError("command_failed", cmdId);
+            }
+            break;
+            
+        case CommandAction::HOLD_GAUGE:
+            if (m_ledController.holdGauge(cmd.positionIndex, cmd.extraValue)) {
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
             } else {
                 m_eventQueue.queueError("command_failed", cmdId);

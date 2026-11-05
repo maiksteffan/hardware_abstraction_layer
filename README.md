@@ -69,6 +69,10 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   length and where every hold sits on it, `SNAKE <start> <len> [r,g,b]` paints
   a span of it on top of the holds and `SNAKE_OFF` removes it. The Snake game
   itself runs on the Pi; `INFO` announces support as `features=snake`.
+- **Hold-time gauge:** `HOLD_GAUGE <pos> <0-100>` lights a hold's green block
+  from the center outward, so a workout can show how much longer the hold must
+  stay gripped. The Pi owns the clock and ticks the percentage down; `INFO`
+  announces support as `features=holdgauge`.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 
@@ -78,6 +82,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 | `EventQueue` | Thread-safe outgoing message queue |
 | `LedController` | Position→LED mapping, all animations, snake overlay |
 | `SnakeTrack.h` | Track math for `TRACK`/`SNAKE` (pure, host-tested) |
+| `HoldGauge.h` | Gauge geometry for `HOLD_GAUGE` (pure, host-tested) |
 | `TouchController` | CAP1188 driver, debounce, touch expectations |
 | `StartupController` | Boot sequence & Pi handshake |
 | `Config.h` | All pins, timing, colors, and the hold↔sensor wiring table |
