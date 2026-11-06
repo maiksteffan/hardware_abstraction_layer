@@ -308,7 +308,7 @@ constexpr uint32_t I2C_CLOCK_SPEED_HZ = 100000;  // 100kHz Standard Mode (long w
 // Attempts per register transfer (a CAP1188 occasionally NACKs; an immediate
 // retry keeps the poll sample instead of losing it). Worst case for a dead chip
 // is I2C_RETRY_COUNT short NACKed transfers, and such a chip is quickly demoted
-// to the slow recovery probe below, so the 5 ms poll cycle is not starved.
+// to single-attempt polling (below), so the 5 ms poll cycle is not starved.
 constexpr uint8_t I2C_RETRY_COUNT = 3;
 constexpr uint16_t I2C_RETRY_DELAY_US = 100;
 
@@ -319,21 +319,23 @@ constexpr uint16_t I2C_RETRY_DELAY_US = 100;
 // never stalls: on timeout the read counts as a failed read, which is safe.
 constexpr uint16_t I2C_BUS_LOCK_TIMEOUT_MS = 10;
 
-// Sensor health. A chip whose status read keeps failing for this many polls
-// (50 ms) is demoted: it is no longer polled every cycle, but probed (full
-// re-initialization) every SENSOR_RECOVERY_INTERVAL_MS. Shorter outages are
-// ridden out by the release-evidence pause. A chip that failed at boot is
-// probed the same way, so it joins as soon as it answers. The interval is the
-// worst-case extra delay before sensing resumes after a link comes back.
+// Sensor health. A chip whose status read fails this many polls in a row
+// (50 ms) is demoted: it is still polled EVERY cycle, but with a single attempt
+// instead of retries, so a dead chip cannot eat the poll time of healthy ones.
+// The first successful read promotes it again immediately (and re-verifies its
+// configuration), so an outage never lasts longer than the outage itself.
+// A chip that failed at boot is never polled; it is re-initialized every
+// SENSOR_RECOVERY_INTERVAL_MS until it answers and then joins.
 constexpr uint8_t  SENSOR_DEGRADE_AFTER_FAILED_POLLS = 10;
 constexpr uint16_t SENSOR_RECOVERY_INTERVAL_MS = 250;
 // A healthy chip that was power-glitched silently reverts to register defaults
 // (multi-touch blocking on, all channels enabled, chip default sensitivity).
 // Its configuration is verified this often and re-applied on mismatch.
 constexpr uint16_t SENSOR_VERIFY_INTERVAL_MS = 1000;
-// If this many consecutive recovery probes fail while NO chip answers at all,
-// the I2C peripheral is re-initialized (a hung bus is otherwise never cleared).
-constexpr uint8_t  I2C_BUS_RESET_AFTER_FAILED_PROBES = 4;
+// If NO chip has answered for this long the I2C peripheral is re-initialized
+// (a hung bus is otherwise never cleared). One dead chip on a working bus
+// never triggers this.
+constexpr uint16_t I2C_BUS_RESET_AFTER_SILENT_MS = 1000;
 
 // ============================================================================
 // CAP1188 TOUCH SENSOR REGISTERS
@@ -344,6 +346,15 @@ constexpr uint8_t CAP1188_REG_SENSOR_INPUT_STATUS = 0x03;
 constexpr uint8_t CAP1188_REG_SENSOR_INPUT_DELTA_1 = 0x10;
 constexpr uint8_t CAP1188_REG_SENSITIVITY_CONTROL = 0x1F;
 constexpr uint8_t CAP1188_REG_CONFIG1 = 0x20;
+// CONFIG1 bit 3: the chip recalibrates a channel that has been touched for
+// longer than its max duration. A climbing hold is gripped for many seconds, so
+// the chip would silently absorb the hand into its baseline (delta falls to 0
+// while the hand is still there) and miss the next real touch. Kept OFF.
+constexpr uint8_t CAP1188_CONFIG1_MAX_DUR_EN = 0x08;
+// Read-only, logged in the boot DIAG line to verify the chip's own recalibration settings.
+constexpr uint8_t CAP1188_REG_SENSOR_INPUT_CONFIG = 0x22;
+constexpr uint8_t CAP1188_REG_RECAL_CONFIG = 0x2F;
+constexpr uint8_t CAP1188_REG_CONFIG2 = 0x44;
 constexpr uint8_t CAP1188_REG_SENSOR_INPUT_ENABLE = 0x21;
 constexpr uint8_t CAP1188_REG_AVERAGING_SAMPLING = 0x24;
 constexpr uint8_t CAP1188_REG_CALIBRATION_ACTIVE = 0x26;

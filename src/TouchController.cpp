@@ -30,7 +30,7 @@ TouchController::TouchController()
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
     , m_busMutex(xSemaphoreCreateMutex())
-    , m_failedProbes(0)
+    , m_lastAnyAnswer(0)
     , m_handsOffDetectionEnabled(false)
     , m_lastAnyTouched(false)
 {
@@ -88,7 +88,7 @@ bool TouchController::begin() {
     const BoardProfile& profile = activeBoardProfile();
 
     // Reset sensor state
-    m_failedProbes = 0;
+    m_lastAnyAnswer = millis();
     for (uint8_t s = 0; s < MAX_SENSORS; s++) {
         m_sensors[s].active = false;
         m_sensors[s].enableMask = 0;
@@ -430,6 +430,13 @@ bool TouchController::initSensor(uint8_t sensorIndex) {
     // Speed up cycle time
     if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) return false;
 
+    // Never let the chip recalibrate a held touch (see CAP1188_CONFIG1_MAX_DUR_EN).
+    uint8_t cfg1;
+    if (!readRegister(address, CAP1188_REG_CONFIG1, cfg1)) return false;
+    if ((cfg1 & CAP1188_CONFIG1_MAX_DUR_EN) &&
+        !writeRegister(address, CAP1188_REG_CONFIG1,
+                       (uint8_t)(cfg1 & ~CAP1188_CONFIG1_MAX_DUR_EN))) return false;
+
     // Apply the chip's current sensitivity (bits 6:4 of SENSITIVITY_CONTROL, global per chip)
     uint8_t sens;
     if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
@@ -493,31 +500,31 @@ bool TouchController::diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t 
         return false;
     }
 
-    if (!writeRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, 0x00)) {
-        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_mtblk pid=0x%02X",
+    // One init sequence for boot, diagnostics and recovery: this path used to
+    // duplicate a subset of it and skipped the sensitivity, so a chip first
+    // brought up here ran on the chip default.
+    bool wasActive = m_sensors[sensorIndex].active;
+    if (!initSensor(sensorIndex)) {
+        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL init pid=0x%02X",
                  sensorIndex, address, prodId);
-        m_sensors[sensorIndex].active = false;
-        return false;
-    }
-    if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) {
-        snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_standby pid=0x%02X",
-                 sensorIndex, address, prodId);
+        if (wasActive && m_activeSensorCount > 0) m_activeSensorCount--;
         m_sensors[sensorIndex].active = false;
         return false;
     }
 
-    uint8_t mask = m_sensors[sensorIndex].enableMask;
-    if (mask != 0) {
-        if (!writeRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, mask)) {
-            snprintf(outDiag, diagSize, "S%u@0x%02X FAIL write_enable pid=0x%02X",
-                     sensorIndex, address, prodId);
-            m_sensors[sensorIndex].active = false;
-            return false;
-        }
-    }
-
-    snprintf(outDiag, diagSize, "S%u@0x%02X OK pid=0x%02X mask=0x%02X",
-             sensorIndex, address, prodId, mask);
+    // Read-only snapshot of the chip's own recalibration settings: cfg20 (bit3 =
+    // max-duration recal, must be 0), sic22, rc2F, cfg44. Lets a bench session
+    // check them against the datasheet.
+    uint8_t cfg1 = 0, sic = 0, rc = 0, cfg2 = 0;
+    readRegister(address, CAP1188_REG_CONFIG1, cfg1);
+    readRegister(address, CAP1188_REG_SENSOR_INPUT_CONFIG, sic);
+    readRegister(address, CAP1188_REG_RECAL_CONFIG, rc);
+    readRegister(address, CAP1188_REG_CONFIG2, cfg2);
+    snprintf(outDiag, diagSize,
+             "S%u@0x%02X OK pid=0x%02X mask=0x%02X cfg20=0x%02X sic22=0x%02X rc2F=0x%02X cfg44=0x%02X",
+             sensorIndex, address, prodId, m_sensors[sensorIndex].enableMask,
+             cfg1, sic, rc, cfg2);
+    if (!wasActive) m_activeSensorCount++;
     m_sensors[sensorIndex].active = true;
     m_sensors[sensorIndex].degraded = false;
     m_sensors[sensorIndex].failStreak = 0;
@@ -586,26 +593,21 @@ void TouchController::resetBus() {
     unlockBus();
 }
 
-// Re-applies the init sequence (product-ID check, multi-touch, standby,
-// sensitivity, channel enable). Used both for chips that never came up and for
-// chips that dropped off the bus: after a link outage the chip may have been
-// power-cycled and would otherwise run on its defaults.
-bool TouchController::recoverSensor(uint8_t sensorIndex, uint32_t now) {
+// Re-applies the init sequence to a chip that never came up (boot failure).
+// Chips that dropped off the bus later are not handled here: they stay active,
+// are polled every cycle and are re-verified on their first good read.
+void TouchController::recoverSensor(uint8_t sensorIndex, uint32_t now) {
     PhysicalSensor& sensor = m_sensors[sensorIndex];
-    if (now - sensor.lastProbe < SENSOR_RECOVERY_INTERVAL_MS) return false;
+    if (sensor.active || now - sensor.lastProbe < SENSOR_RECOVERY_INTERVAL_MS) return;
 
-    bool wasActive = sensor.active;
     if (!initSensor(sensorIndex)) {
         sensor.lastProbe = now;
-        return true;
+        return;
     }
-    if (!wasActive) {
-        sensor.active = true;
-        m_activeSensorCount++;
-    }
+    sensor.active = true;
     sensor.degraded = false;
     sensor.failStreak = 0;
-    return false;
+    m_activeSensorCount++;
 }
 
 // A silently reset chip answers normally but behaves differently: multi-touch
@@ -621,6 +623,10 @@ void TouchController::verifySensorConfig(uint8_t sensorIndex) {
     if (!readRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, value)) return;
     bool intact = (value & 0x80) == 0;  // MULT_BLK_EN must stay off
 
+    if (intact) {
+        if (!readRegister(address, CAP1188_REG_CONFIG1, value)) return;
+        intact = (value & CAP1188_CONFIG1_MAX_DUR_EN) == 0;
+    }
     if (intact && sensor.enableMask != 0) {
         if (!readRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, value)) return;
         intact = value == sensor.enableMask;
@@ -637,43 +643,59 @@ void TouchController::pollSensors() {
     uint32_t now = millis();
 
     // Step 1: read each active sensor's status register once and cache it.
-    // A chip that keeps failing is demoted to a slow recovery probe, so a dead
-    // chip cannot eat the poll cycle of the healthy ones; a chip that failed at
-    // boot is probed the same way and joins when it answers.
+    // A chip that keeps failing is demoted to single-attempt reads, so a dead
+    // chip cannot eat the poll cycle of the healthy ones, but it is still polled
+    // every cycle: the first good read resumes sensing at once. A chip that
+    // failed at boot is re-initialized periodically and joins when it answers.
     bool anyValid = false;
-    bool probeFailed = false;
     for (uint8_t s = 0; s < profile.sensorCount; s++) {
         PhysicalSensor& sensor = m_sensors[s];
         sensor.statusValid = false;
-        if (!sensor.active || sensor.degraded) {
-            if (recoverSensor(s, now)) probeFailed = true;
+        if (!sensor.active) {
+            recoverSensor(s, now);
             continue;
         }
 
-        uint8_t status;
-        if (readRegister(profile.sensorAddresses[s],
-                         CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
+        uint8_t status = 0;
+        bool ok = false;
+        if (sensor.degraded) {
+            if (lockBus()) {
+                ok = readRegisterOnce(profile.sensorAddresses[s],
+                                      CAP1188_REG_SENSOR_INPUT_STATUS, status);
+                unlockBus();
+            }
+        } else {
+            ok = readRegister(profile.sensorAddresses[s],
+                              CAP1188_REG_SENSOR_INPUT_STATUS, status);
+        }
+
+        if (ok) {
             sensor.lastStatus = status;
             sensor.statusValid = true;
             sensor.failStreak = 0;
             anyValid = true;
+            if (sensor.degraded) {
+                // The chip may have been power-cycled while it was away:
+                // check its configuration now, not at the next 1 s tick.
+                sensor.degraded = false;
+                sensor.lastProbe = now - SENSOR_VERIFY_INTERVAL_MS;
+            }
             if (now - sensor.lastProbe >= SENSOR_VERIFY_INTERVAL_MS) {
                 sensor.lastProbe = now;
                 verifySensorConfig(s);
             }
-        } else if (sensor.failStreak < 255 &&
+        } else if (!sensor.degraded &&
                    ++sensor.failStreak >= SENSOR_DEGRADE_AFTER_FAILED_POLLS) {
             sensor.degraded = true;
-            sensor.lastProbe = now;
         }
     }
     // Only when NOTHING answers is the bus itself suspect (a slave holding SDA
     // low after a mid-transfer reset takes every chip down). One dead chip on a
     // working bus never triggers this.
-    if (anyValid) {
-        m_failedProbes = 0;
-    } else if (probeFailed && ++m_failedProbes >= I2C_BUS_RESET_AFTER_FAILED_PROBES) {
-        m_failedProbes = 0;
+    if (anyValid || profile.sensorCount == 0) {
+        m_lastAnyAnswer = now;
+    } else if (now - m_lastAnyAnswer >= I2C_BUS_RESET_AFTER_SILENT_MS) {
+        m_lastAnyAnswer = now;
         resetBus();
     }
 

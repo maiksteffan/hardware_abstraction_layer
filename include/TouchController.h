@@ -172,7 +172,7 @@ private:
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
     SemaphoreHandle_t m_busMutex;        // One Wire transfer at a time across both cores
-    uint8_t m_failedProbes;              // Consecutive failed recovery probes, no chip answering
+    uint32_t m_lastAnyAnswer;            // Last poll at which any chip answered (bus-hang detection)
     bool m_handsOffDetectionEnabled;    // HANDSOFF_DETECTION_ON/OFF
     bool m_lastAnyTouched;              // Last reported board-occupancy state
     
@@ -183,7 +183,7 @@ private:
     bool writeRegisterOnce(uint8_t address, uint8_t reg, uint8_t value);
     bool lockBus();
     void unlockBus();
-    bool recoverSensor(uint8_t sensorIndex, uint32_t now);  // Probe a failed/degraded chip; true if it failed
+    void recoverSensor(uint8_t sensorIndex, uint32_t now);  // Re-init a chip that never came up
     void verifySensorConfig(uint8_t sensorIndex);           // Re-apply config after a silent reset
     void resetBus();                                        // Re-initialize the I2C peripheral
     void pollSensors();

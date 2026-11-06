@@ -312,13 +312,46 @@ void test_runtime_sensitivity_survives_reconfiguration() {
 void test_bus_is_reset_only_when_no_chip_answers() {
     uint8_t address = addressOf(0);
     Wire.failBus[address] = true;
-    advance(SENSOR_RECOVERY_INTERVAL_MS * (I2C_BUS_RESET_AFTER_FAILED_PROBES + 2));
+    advance(I2C_BUS_RESET_AFTER_SILENT_MS * 2);
     TEST_ASSERT_EQUAL_UINT32(0, Wire.endCalls);
 
     const BoardProfile& profile = activeBoardProfile();
     for (uint8_t s = 0; s < profile.sensorCount; s++) Wire.failBus[profile.sensorAddresses[s]] = true;
-    advance(SENSOR_RECOVERY_INTERVAL_MS * (I2C_BUS_RESET_AFTER_FAILED_PROBES + 2));
+    advance(I2C_BUS_RESET_AFTER_SILENT_MS + 100);
     TEST_ASSERT_GREATER_THAN(0, Wire.endCalls);
+}
+
+void test_degraded_chip_resumes_on_its_first_good_read() {
+    uint8_t address = addressOf(0);
+    Wire.failBus[address] = true;
+    advance(SENSOR_DEGRADE_AFTER_FAILED_POLLS * TOUCH_POLL_INTERVAL_MS * 4);
+    Wire.failBus[address] = false;
+    contact(0, true);
+    g_touch.setExpectDown(0, 12);
+    advance(2 * TOUCH_POLL_INTERVAL_MS);  // not SENSOR_RECOVERY_INTERVAL_MS
+    expectEvent(0, EventType::TOUCHED, 12, "H01");
+}
+
+void test_chip_max_duration_recalibration_is_kept_off() {
+    uint8_t address = addressOf(0);
+    // Chip default (or a reset chip) with max-duration recal on.
+    Wire.registers[address][CAP1188_REG_CONFIG1] = CAP1188_CONFIG1_MAX_DUR_EN | 0x20;
+    advance(SENSOR_VERIFY_INTERVAL_MS + 10);
+    TEST_ASSERT_EQUAL_UINT8(0, Wire.registers[address][CAP1188_REG_CONFIG1] & CAP1188_CONFIG1_MAX_DUR_EN);
+    // Other bits are preserved.
+    TEST_ASSERT_EQUAL_UINT8(0x20, Wire.registers[address][CAP1188_REG_CONFIG1]);
+}
+
+void test_boot_diag_applies_the_full_init_and_logs_the_chip_registers() {
+    uint8_t address = activeBoardProfile().sensorAddresses[0];
+    Wire.registers[address][CAP1188_REG_CONFIG1] = CAP1188_CONFIG1_MAX_DUR_EN;
+    Wire.registers[address][CAP1188_REG_SENSITIVITY_CONTROL] = 0x00;
+    char diag[96];
+    TEST_ASSERT_TRUE(g_touch.diagInitSensor(0, diag, sizeof(diag)));
+    TEST_ASSERT_NOT_NULL(strstr(diag, " OK "));
+    TEST_ASSERT_NOT_NULL(strstr(diag, "cfg20=0x00"));
+    TEST_ASSERT_EQUAL_UINT8(CAP1188_DEFAULT_SENSITIVITY,
+                            (Wire.registers[address][CAP1188_REG_SENSITIVITY_CONTROL] >> 4) & 7);
 }
 
 void test_v2_eighth_sensor_channel_is_enabled_and_detected() {
@@ -826,6 +859,9 @@ int main() {
     RUN_TEST(test_silent_chip_reset_is_detected_and_reconfigured);
     RUN_TEST(test_runtime_sensitivity_survives_reconfiguration);
     RUN_TEST(test_bus_is_reset_only_when_no_chip_answers);
+    RUN_TEST(test_degraded_chip_resumes_on_its_first_good_read);
+    RUN_TEST(test_chip_max_duration_recalibration_is_kept_off);
+    RUN_TEST(test_boot_diag_applies_the_full_init_and_logs_the_chip_registers);
     RUN_TEST(test_v2_eighth_sensor_channel_is_enabled_and_detected);
     RUN_TEST(test_handoff_preserves_occupancy_until_last_hold_releases);
     RUN_TEST(test_two_simultaneous_grabs_are_delivered_across_rearming);

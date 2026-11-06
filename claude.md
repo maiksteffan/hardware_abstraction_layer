@@ -245,16 +245,23 @@ an undelivered one. Existing protocol messages/ids are unchanged.
 (`I2C_BUS_LOCK_TIMEOUT_MS` = 10; a timeout counts as a failed read) and is
 retried `I2C_RETRY_COUNT` (3) times, so a single NACK no longer loses a poll
 sample. A chip with `SENSOR_DEGRADE_AFTER_FAILED_POLLS` (10) consecutive failed
-status polls is demoted; demoted chips and chips that failed at boot are fully
-re-initialized every `SENSOR_RECOVERY_INTERVAL_MS` (250) and rejoin when they
-answer. Healthy chips are verified every `SENSOR_VERIFY_INTERVAL_MS` (1000)
-(multi-touch block off, enable mask, sensitivity) and re-initialized on
-mismatch, covering silent chip resets; runtime `SET_SENSITIVITY` levels are
-remembered per chip and re-applied. If no chip answers for
-`I2C_BUS_RESET_AFTER_FAILED_PROBES` (4) probe rounds the I²C peripheral is
-re-initialized. Tradeoff: after an outage longer than ~50 ms, sensing resumes
-up to 250 ms late; release evidence stays paused meanwhile (no false release).
-These intervals are untested on hardware.
+status polls is demoted to single-attempt reads (so a dead chip cannot stall
+the others) but is still polled every cycle; its first good read resumes
+sensing immediately and forces a config verify. Chips that failed at boot are
+fully re-initialized every `SENSOR_RECOVERY_INTERVAL_MS` (250) and join when
+they answer. Healthy chips are verified every `SENSOR_VERIFY_INTERVAL_MS`
+(1000) (multi-touch block off, max-duration recal off, enable mask,
+sensitivity) and re-initialized on mismatch, covering silent chip resets;
+runtime `SET_SENSITIVITY` levels are remembered per chip and re-applied. If no
+chip answers for `I2C_BUS_RESET_AFTER_SILENT_MS` (1000) the I²C peripheral is
+re-initialized. Release evidence stays paused during outages (no false
+release). Boot, DIAG and recovery share one `initSensor` sequence; the boot
+`DIAG S<n> OK` line also logs `cfg20/sic22/rc2F/cfg44` (the chip's own
+recalibration registers, read-only) for bench checks against the datasheet.
+`MAX_DUR_EN` (CONFIG1 bit 3) is cleared so the chip cannot recalibrate a held
+touch away (suspected cause of delta dropping 127 -> 0 mid-hold; unverified
+on hardware). Tradeoff: a genuinely stuck channel is no longer
+auto-recalibrated; use `RECALIBRATE`. Intervals are untested on hardware.
 
 **Grip bridging (long holds with signal dips):** the status bit drops as soon as
 the delta count falls under the chip threshold (default 64), but a hand that is
