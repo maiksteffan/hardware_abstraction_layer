@@ -249,8 +249,76 @@ void test_failed_status_reads_cannot_confirm_a_release() {
     TEST_ASSERT_TRUE(g_touch.isTouched(0));
     TEST_ASSERT_EQUAL_UINT8(0, g_count);
     Wire.failStatus[address] = false;
-    advance(TOUCH_DEBOUNCE_RELEASE_MS + 10);
+    // A 500 ms outage demotes the chip; the next recovery probe is at most
+    // SENSOR_RECOVERY_INTERVAL_MS away and only then does release evidence run.
+    advance(SENSOR_RECOVERY_INTERVAL_MS + TOUCH_DEBOUNCE_RELEASE_MS + 10);
     expectEvent(0, EventType::TOUCH_RELEASED, 100, "H01");
+}
+
+static uint8_t addressOf(uint8_t input) {
+    const BoardProfile& profile = activeBoardProfile();
+    return profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+}
+
+void test_transient_nack_is_retried_and_keeps_the_sample() {
+    contact(0, true);
+    g_touch.setExpectDown(0, 7);
+    Wire.failCount[addressOf(0)] = I2C_RETRY_COUNT - 1;
+    advance(5);
+    expectEvent(0, EventType::TOUCHED, 7, "H01");
+}
+
+void test_lost_chip_recovers_and_reports_state_again() {
+    uint8_t address = addressOf(0);
+    Wire.failBus[address] = true;
+    advance(SENSOR_RECOVERY_INTERVAL_MS * 3);
+    Wire.failBus[address] = false;
+    contact(0, true);
+    g_touch.setExpectDown(0, 8);
+    advance(SENSOR_RECOVERY_INTERVAL_MS + 10);
+    expectEvent(0, EventType::TOUCHED, 8, "H01");
+}
+
+void test_chip_that_failed_at_boot_joins_later() {
+    uint8_t address = addressOf(0);
+    Wire.failBus[address] = true;
+    TEST_ASSERT_TRUE(g_touch.begin() || true);
+    advance(SENSOR_RECOVERY_INTERVAL_MS);
+    Wire.failBus[address] = false;
+    Wire.registers[address][CAP1188_REG_PRODUCT_ID] = 0x50;
+    contact(0, true);
+    g_touch.setExpectDown(0, 9);
+    advance(SENSOR_RECOVERY_INTERVAL_MS * 2);
+    expectEvent(0, EventType::TOUCHED, 9, "H01");
+}
+
+void test_silent_chip_reset_is_detected_and_reconfigured() {
+    uint8_t address = addressOf(0);
+    Wire.registers[address][CAP1188_REG_MULTIPLE_TOUCH_CONFIG] = 0x80;
+    Wire.registers[address][CAP1188_REG_SENSOR_INPUT_ENABLE] = 0xFF;
+    advance(SENSOR_VERIFY_INTERVAL_MS + 10);
+    TEST_ASSERT_EQUAL_UINT8(0x00, Wire.registers[address][CAP1188_REG_MULTIPLE_TOUCH_CONFIG] & 0x80);
+    TEST_ASSERT_NOT_EQUAL(0xFF, Wire.registers[address][CAP1188_REG_SENSOR_INPUT_ENABLE]);
+}
+
+void test_runtime_sensitivity_survives_reconfiguration() {
+    uint8_t address = addressOf(0);
+    TEST_ASSERT_TRUE(g_touch.setSensitivity(0, 1));
+    Wire.registers[address][CAP1188_REG_MULTIPLE_TOUCH_CONFIG] = 0x80;
+    advance(SENSOR_VERIFY_INTERVAL_MS + 10);
+    TEST_ASSERT_EQUAL_UINT8(1, (Wire.registers[address][CAP1188_REG_SENSITIVITY_CONTROL] >> 4) & 7);
+}
+
+void test_bus_is_reset_only_when_no_chip_answers() {
+    uint8_t address = addressOf(0);
+    Wire.failBus[address] = true;
+    advance(SENSOR_RECOVERY_INTERVAL_MS * (I2C_BUS_RESET_AFTER_FAILED_PROBES + 2));
+    TEST_ASSERT_EQUAL_UINT32(0, Wire.endCalls);
+
+    const BoardProfile& profile = activeBoardProfile();
+    for (uint8_t s = 0; s < profile.sensorCount; s++) Wire.failBus[profile.sensorAddresses[s]] = true;
+    advance(SENSOR_RECOVERY_INTERVAL_MS * (I2C_BUS_RESET_AFTER_FAILED_PROBES + 2));
+    TEST_ASSERT_GREATER_THAN(0, Wire.endCalls);
 }
 
 void test_v2_eighth_sensor_channel_is_enabled_and_detected() {
@@ -752,6 +820,12 @@ int main() {
     RUN_TEST(test_brush_by_and_stale_grabs_are_not_reported);
     RUN_TEST(test_clean_queue_does_not_replay_an_already_held_candidate);
     RUN_TEST(test_failed_status_reads_cannot_confirm_a_release);
+    RUN_TEST(test_transient_nack_is_retried_and_keeps_the_sample);
+    RUN_TEST(test_lost_chip_recovers_and_reports_state_again);
+    RUN_TEST(test_chip_that_failed_at_boot_joins_later);
+    RUN_TEST(test_silent_chip_reset_is_detected_and_reconfigured);
+    RUN_TEST(test_runtime_sensitivity_survives_reconfiguration);
+    RUN_TEST(test_bus_is_reset_only_when_no_chip_answers);
     RUN_TEST(test_v2_eighth_sensor_channel_is_enabled_and_detected);
     RUN_TEST(test_handoff_preserves_occupancy_until_last_hold_releases);
     RUN_TEST(test_two_simultaneous_grabs_are_delivered_across_rearming);

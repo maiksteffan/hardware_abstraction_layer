@@ -90,7 +90,7 @@ Sequenzboard repo.
 
 | Core | Runs | Owns |
 |---|---|---|
-| **Core 0** | `touchPollingTask` → `TouchController::tick()` every 5 ms (`vTaskDelayUntil`) | ALL I²C traffic |
+| **Core 0** | `touchPollingTask` → `TouchController::tick()` every 5 ms (`vTaskDelayUntil`) | Sensor polling I²C traffic (Core 1 commands `VALUE`/`RECALIBRATE*`/`SET_SENSITIVITY` also use the bus, serialized by `m_busMutex`) |
 | **Core 1** | Arduino `loop()` | Serial RX/TX, command execution, ALL NeoPixel writes |
 
 Outgoing cross-core events use the **`EventQueue`** (FreeRTOS-mutex-protected,
@@ -240,6 +240,21 @@ delivery with zero mutex wait. Query before recalibrating a blocked hold to
 distinguish sensor silence, invalid I2C reads, consumption and delivery gating.
 Only one diagnostic request should be outstanding; a newer request replaces
 an undelivered one. Existing protocol messages/ids are unchanged.
+
+**I²C reliability:** every register transfer holds `m_busMutex`
+(`I2C_BUS_LOCK_TIMEOUT_MS` = 10; a timeout counts as a failed read) and is
+retried `I2C_RETRY_COUNT` (3) times, so a single NACK no longer loses a poll
+sample. A chip with `SENSOR_DEGRADE_AFTER_FAILED_POLLS` (10) consecutive failed
+status polls is demoted; demoted chips and chips that failed at boot are fully
+re-initialized every `SENSOR_RECOVERY_INTERVAL_MS` (250) and rejoin when they
+answer. Healthy chips are verified every `SENSOR_VERIFY_INTERVAL_MS` (1000)
+(multi-touch block off, enable mask, sensitivity) and re-initialized on
+mismatch, covering silent chip resets; runtime `SET_SENSITIVITY` levels are
+remembered per chip and re-applied. If no chip answers for
+`I2C_BUS_RESET_AFTER_FAILED_PROBES` (4) probe rounds the I²C peripheral is
+re-initialized. Tradeoff: after an outage longer than ~50 ms, sensing resumes
+up to 250 ms late; release evidence stays paused meanwhile (no false release).
+These intervals are untested on hardware.
 
 **Grip bridging (long holds with signal dips):** the status bit drops as soon as
 the delta count falls under the chip threshold (default 64), but a hand that is

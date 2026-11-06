@@ -19,5 +19,10 @@ inline int xSemaphoreTake(SemaphoreHandle_t, TickType_t timeout) {
 	return pdFALSE;
 }
 inline void xSemaphoreGive(SemaphoreHandle_t) {}
+#else
+// Single-threaded host harness: the bus mutex is always available.
+inline SemaphoreHandle_t xSemaphoreCreateMutex() { static int token; return &token; }
+inline int xSemaphoreTake(SemaphoreHandle_t, TickType_t) { return pdTRUE; }
+inline void xSemaphoreGive(SemaphoreHandle_t) {}
 #endif
 #endif

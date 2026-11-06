@@ -29,6 +29,8 @@ TouchController::TouchController()
     , m_sweepHoldoffUntil(0)
     , m_lastPollTime(0)
     , m_activeSensorCount(0)
+    , m_busMutex(xSemaphoreCreateMutex())
+    , m_failedProbes(0)
     , m_handsOffDetectionEnabled(false)
     , m_lastAnyTouched(false)
 {
@@ -38,8 +40,10 @@ TouchController::TouchController()
         m_sensors[s].active = false;
         m_sensors[s].enableMask = 0;
         m_sensors[s].lastStatus = 0;
-        m_sensors[s].statusValid = false;
-    }
+        m_sensors[s].statusValid = false;        m_sensors[s].degraded = false;
+        m_sensors[s].failStreak = 0;
+        m_sensors[s].sensitivity = CAP1188_DEFAULT_SENSITIVITY;
+        m_sensors[s].lastProbe = 0;    }
     for (uint8_t i = 0; i < MAX_HOLDS; i++) {
         m_inputs[i].currentTouched = false;
         m_inputs[i].debouncedTouched = false;
@@ -84,11 +88,16 @@ bool TouchController::begin() {
     const BoardProfile& profile = activeBoardProfile();
 
     // Reset sensor state
+    m_failedProbes = 0;
     for (uint8_t s = 0; s < MAX_SENSORS; s++) {
         m_sensors[s].active = false;
         m_sensors[s].enableMask = 0;
         m_sensors[s].lastStatus = 0;
         m_sensors[s].statusValid = false;
+        m_sensors[s].degraded = false;
+        m_sensors[s].failStreak = 0;
+        m_sensors[s].sensitivity = CAP1188_DEFAULT_SENSITIVITY;
+        m_sensors[s].lastProbe = millis();
     }
 
     // Build per-sensor enable mask from the profile's input mappings
@@ -183,7 +192,15 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
         return false;
     }
     regValue = (uint8_t)((regValue & 0x8F) | (level << 4));
-    return writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue);
+    // Publish the wanted level BEFORE writing: the polling core verifies the
+    // chip against it and would otherwise "repair" the new level back to the old one.
+    uint8_t previous = m_sensors[s].sensitivity;
+    m_sensors[s].sensitivity = level;
+    if (!writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue)) {
+        m_sensors[s].sensitivity = previous;
+        return false;
+    }
+    return true;
 }
 
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
@@ -389,6 +406,7 @@ bool TouchController::initSensor(uint8_t sensorIndex) {
     const BoardProfile& profile = activeBoardProfile();
     if (sensorIndex >= profile.sensorCount) return false;
     uint8_t address = profile.sensorAddresses[sensorIndex];
+    m_sensors[sensorIndex].lastProbe = millis();
 
     // NOTE: We deliberately do NOT do a bare address-only probe here.
     // Some CAP1188 board variants / level shifters don't ACK an empty
@@ -412,10 +430,10 @@ bool TouchController::initSensor(uint8_t sensorIndex) {
     // Speed up cycle time
     if (!writeRegister(address, CAP1188_REG_STANDBY_CONFIG, 0x30)) return false;
 
-    // Apply default sensitivity (bits 6:4 of SENSITIVITY_CONTROL, global per chip)
+    // Apply the chip's current sensitivity (bits 6:4 of SENSITIVITY_CONTROL, global per chip)
     uint8_t sens;
     if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
-    sens = (uint8_t)((sens & 0x8F) | (CAP1188_DEFAULT_SENSITIVITY << 4));
+    sens = (uint8_t)((sens & 0x8F) | (m_sensors[sensorIndex].sensitivity << 4));
     if (!writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, sens)) return false;
 
     // Enable exactly the channels referenced by profile.inputMappings for this sensor.
@@ -501,10 +519,22 @@ bool TouchController::diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t 
     snprintf(outDiag, diagSize, "S%u@0x%02X OK pid=0x%02X mask=0x%02X",
              sensorIndex, address, prodId, mask);
     m_sensors[sensorIndex].active = true;
+    m_sensors[sensorIndex].degraded = false;
+    m_sensors[sensorIndex].failStreak = 0;
+    m_sensors[sensorIndex].lastProbe = millis();
     return true;
 }
 
-bool TouchController::readRegister(uint8_t address, uint8_t reg, uint8_t& value) {
+bool TouchController::lockBus() {
+    if (!m_busMutex) return true;
+    return xSemaphoreTake(m_busMutex, pdMS_TO_TICKS(I2C_BUS_LOCK_TIMEOUT_MS)) == pdTRUE;
+}
+
+void TouchController::unlockBus() {
+    if (m_busMutex) xSemaphoreGive(m_busMutex);
+}
+
+bool TouchController::readRegisterOnce(uint8_t address, uint8_t reg, uint8_t& value) {
     Wire.beginTransmission(address);
     Wire.write(reg);
     if (Wire.endTransmission() != 0) return false;
@@ -516,11 +546,90 @@ bool TouchController::readRegister(uint8_t address, uint8_t reg, uint8_t& value)
     return false;
 }
 
-bool TouchController::writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
+bool TouchController::writeRegisterOnce(uint8_t address, uint8_t reg, uint8_t value) {
     Wire.beginTransmission(address);
     Wire.write(reg);
     Wire.write(value);
     return Wire.endTransmission() == 0;
+}
+
+// Each attempt takes the bus lock on its own, so a retry never keeps the other
+// core waiting. Failing to get the lock is reported as a failed transfer rather
+// than retried: the caller already treats that as "no sample this poll".
+bool TouchController::readRegister(uint8_t address, uint8_t reg, uint8_t& value) {
+    for (uint8_t attempt = 0; attempt < I2C_RETRY_COUNT; attempt++) {
+        if (attempt > 0) delayMicroseconds(I2C_RETRY_DELAY_US);
+        if (!lockBus()) return false;
+        bool ok = readRegisterOnce(address, reg, value);
+        unlockBus();
+        if (ok) return true;
+    }
+    return false;
+}
+
+bool TouchController::writeRegister(uint8_t address, uint8_t reg, uint8_t value) {
+    for (uint8_t attempt = 0; attempt < I2C_RETRY_COUNT; attempt++) {
+        if (attempt > 0) delayMicroseconds(I2C_RETRY_DELAY_US);
+        if (!lockBus()) return false;
+        bool ok = writeRegisterOnce(address, reg, value);
+        unlockBus();
+        if (ok) return true;
+    }
+    return false;
+}
+
+void TouchController::resetBus() {
+    if (!lockBus()) return;
+    Wire.end();
+    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    Wire.setClock(I2C_CLOCK_SPEED_HZ);
+    unlockBus();
+}
+
+// Re-applies the init sequence (product-ID check, multi-touch, standby,
+// sensitivity, channel enable). Used both for chips that never came up and for
+// chips that dropped off the bus: after a link outage the chip may have been
+// power-cycled and would otherwise run on its defaults.
+bool TouchController::recoverSensor(uint8_t sensorIndex, uint32_t now) {
+    PhysicalSensor& sensor = m_sensors[sensorIndex];
+    if (now - sensor.lastProbe < SENSOR_RECOVERY_INTERVAL_MS) return false;
+
+    bool wasActive = sensor.active;
+    if (!initSensor(sensorIndex)) {
+        sensor.lastProbe = now;
+        return true;
+    }
+    if (!wasActive) {
+        sensor.active = true;
+        m_activeSensorCount++;
+    }
+    sensor.degraded = false;
+    sensor.failStreak = 0;
+    return false;
+}
+
+// A silently reset chip answers normally but behaves differently: multi-touch
+// blocking comes back (a second simultaneous hold is dropped), every channel is
+// enabled and sensitivity reverts to the chip default. Only registers the
+// firmware itself wrote are compared. A failed read is ignored here: the status
+// polling tracks communication health.
+void TouchController::verifySensorConfig(uint8_t sensorIndex) {
+    PhysicalSensor& sensor = m_sensors[sensorIndex];
+    uint8_t address = activeBoardProfile().sensorAddresses[sensorIndex];
+    uint8_t value;
+
+    if (!readRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, value)) return;
+    bool intact = (value & 0x80) == 0;  // MULT_BLK_EN must stay off
+
+    if (intact && sensor.enableMask != 0) {
+        if (!readRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, value)) return;
+        intact = value == sensor.enableMask;
+    }
+    if (intact) {
+        if (!readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, value)) return;
+        intact = ((value >> 4) & 0x07) == sensor.sensitivity;
+    }
+    if (!intact) initSensor(sensorIndex);
 }
 
 void TouchController::pollSensors() {
@@ -528,16 +637,44 @@ void TouchController::pollSensors() {
     uint32_t now = millis();
 
     // Step 1: read each active sensor's status register once and cache it.
+    // A chip that keeps failing is demoted to a slow recovery probe, so a dead
+    // chip cannot eat the poll cycle of the healthy ones; a chip that failed at
+    // boot is probed the same way and joins when it answers.
+    bool anyValid = false;
+    bool probeFailed = false;
     for (uint8_t s = 0; s < profile.sensorCount; s++) {
-        m_sensors[s].statusValid = false;
-        if (!m_sensors[s].active) continue;
+        PhysicalSensor& sensor = m_sensors[s];
+        sensor.statusValid = false;
+        if (!sensor.active || sensor.degraded) {
+            if (recoverSensor(s, now)) probeFailed = true;
+            continue;
+        }
 
         uint8_t status;
         if (readRegister(profile.sensorAddresses[s],
                          CAP1188_REG_SENSOR_INPUT_STATUS, status)) {
-            m_sensors[s].lastStatus = status;
-            m_sensors[s].statusValid = true;
+            sensor.lastStatus = status;
+            sensor.statusValid = true;
+            sensor.failStreak = 0;
+            anyValid = true;
+            if (now - sensor.lastProbe >= SENSOR_VERIFY_INTERVAL_MS) {
+                sensor.lastProbe = now;
+                verifySensorConfig(s);
+            }
+        } else if (sensor.failStreak < 255 &&
+                   ++sensor.failStreak >= SENSOR_DEGRADE_AFTER_FAILED_POLLS) {
+            sensor.degraded = true;
+            sensor.lastProbe = now;
         }
+    }
+    // Only when NOTHING answers is the bus itself suspect (a slave holding SDA
+    // low after a mid-transfer reset takes every chip down). One dead chip on a
+    // working bus never triggers this.
+    if (anyValid) {
+        m_failedProbes = 0;
+    } else if (probeFailed && ++m_failedProbes >= I2C_BUS_RESET_AFTER_FAILED_PROBES) {
+        m_failedProbes = 0;
+        resetBus();
     }
 
     // Step 2: update per-input "current" state from cached status registers.

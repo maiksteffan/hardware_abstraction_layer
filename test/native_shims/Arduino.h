@@ -16,6 +16,7 @@
 // Controlled by the touch-controller host tests; never linked on the MCU.
 uint32_t millis();
 void delay(uint32_t milliseconds);
+inline void delayMicroseconds(uint32_t) {}
 
 #ifdef SEQUENZBOARD_EVENT_QUEUE_TEST
 // Only the real EventQueue test suite needs a serial sink. Other suites use

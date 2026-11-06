@@ -304,9 +304,36 @@ constexpr uint8_t COLOR_RECORD_B = 10;
 // 9. I2C CONFIGURATION
 // ============================================================================
 
-constexpr uint32_t I2C_CLOCK_SPEED_HZ = 100000;  // 400kHz Fast Mode
+constexpr uint32_t I2C_CLOCK_SPEED_HZ = 100000;  // 100kHz Standard Mode (long wires; 400kHz is untested)
+// Attempts per register transfer (a CAP1188 occasionally NACKs; an immediate
+// retry keeps the poll sample instead of losing it). Worst case for a dead chip
+// is I2C_RETRY_COUNT short NACKed transfers, and such a chip is quickly demoted
+// to the slow recovery probe below, so the 5 ms poll cycle is not starved.
 constexpr uint8_t I2C_RETRY_COUNT = 3;
 constexpr uint16_t I2C_RETRY_DELAY_US = 100;
+
+// The Wire driver is not safe to share between cores. Commands that touch
+// the chips (VALUE, RECALIBRATE*, SET_SENSITIVITY) run on the serial core while
+// the polling core reads status, so every transfer holds this mutex. It must be
+// longer than a normal transfer (~1 ms) and short enough that the polling core
+// never stalls: on timeout the read counts as a failed read, which is safe.
+constexpr uint16_t I2C_BUS_LOCK_TIMEOUT_MS = 10;
+
+// Sensor health. A chip whose status read keeps failing for this many polls
+// (50 ms) is demoted: it is no longer polled every cycle, but probed (full
+// re-initialization) every SENSOR_RECOVERY_INTERVAL_MS. Shorter outages are
+// ridden out by the release-evidence pause. A chip that failed at boot is
+// probed the same way, so it joins as soon as it answers. The interval is the
+// worst-case extra delay before sensing resumes after a link comes back.
+constexpr uint8_t  SENSOR_DEGRADE_AFTER_FAILED_POLLS = 10;
+constexpr uint16_t SENSOR_RECOVERY_INTERVAL_MS = 250;
+// A healthy chip that was power-glitched silently reverts to register defaults
+// (multi-touch blocking on, all channels enabled, chip default sensitivity).
+// Its configuration is verified this often and re-applied on mismatch.
+constexpr uint16_t SENSOR_VERIFY_INTERVAL_MS = 1000;
+// If this many consecutive recovery probes fail while NO chip answers at all,
+// the I2C peripheral is re-initialized (a hung bus is otherwise never cleared).
+constexpr uint8_t  I2C_BUS_RESET_AFTER_FAILED_PROBES = 4;
 
 // ============================================================================
 // CAP1188 TOUCH SENSOR REGISTERS

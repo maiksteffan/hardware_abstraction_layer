@@ -11,12 +11,10 @@ struct portMUX_TYPE {};
 inline void portENTER_CRITICAL(portMUX_TYPE*) {}
 inline void portEXIT_CRITICAL(portMUX_TYPE*) {}
 
-#ifdef SEQUENZBOARD_EVENT_QUEUE_TEST
 #include <stdint.h>
 using TickType_t = uint32_t;
 constexpr int pdTRUE = 1;
 constexpr int pdFALSE = 0;
 constexpr TickType_t portMAX_DELAY = UINT32_MAX;
 inline TickType_t pdMS_TO_TICKS(uint32_t milliseconds) { return milliseconds; }
-#endif
 #endif

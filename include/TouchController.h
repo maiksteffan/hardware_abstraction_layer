@@ -18,6 +18,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "Config.h"
 
 class EventQueue;
@@ -32,6 +33,10 @@ struct PhysicalSensor {
     uint8_t enableMask;   // OR of (1 << channel) for every input mapped to this sensor
     uint8_t lastStatus;   // Last-read SENSOR_INPUT_STATUS register (cached per poll cycle)
     bool statusValid;     // Whether lastStatus holds a fresh value
+    bool degraded;        // Active chip whose status reads keep failing; probed, not polled
+    uint8_t failStreak;   // Consecutive failed status polls (saturating)
+    uint8_t sensitivity;  // Level to (re)apply at init; follows SET_SENSITIVITY
+    uint32_t lastProbe;   // Last config verification (healthy) or recovery attempt (not)
 };
 
 // State for one logical input (H01..H{holdCount})
@@ -166,12 +171,21 @@ private:
     uint32_t m_sweepHoldoffUntil;      // EXPECT_ANY decisions deferred until this time
     uint32_t m_lastPollTime;
     uint8_t m_activeSensorCount;
+    SemaphoreHandle_t m_busMutex;        // One Wire transfer at a time across both cores
+    uint8_t m_failedProbes;              // Consecutive failed recovery probes, no chip answering
     bool m_handsOffDetectionEnabled;    // HANDSOFF_DETECTION_ON/OFF
     bool m_lastAnyTouched;              // Last reported board-occupancy state
     
     bool initSensor(uint8_t sensorIndex);
     bool readRegister(uint8_t address, uint8_t reg, uint8_t& value);
     bool writeRegister(uint8_t address, uint8_t reg, uint8_t value);
+    bool readRegisterOnce(uint8_t address, uint8_t reg, uint8_t& value);
+    bool writeRegisterOnce(uint8_t address, uint8_t reg, uint8_t value);
+    bool lockBus();
+    void unlockBus();
+    bool recoverSensor(uint8_t sensorIndex, uint32_t now);  // Probe a failed/degraded chip; true if it failed
+    void verifySensorConfig(uint8_t sensorIndex);           // Re-apply config after a silent reset
+    void resetBus();                                        // Re-initialize the I2C peripheral
     void pollSensors();
     void processDebounce();
     void processPointExpectations();  // Claim states and retry rejected events every tick
