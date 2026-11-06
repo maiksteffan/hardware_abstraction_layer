@@ -47,6 +47,7 @@ TouchController::TouchController()
         m_inputs[i].lastChangeTime = 0;
         m_inputs[i].lastSampleTime = 0;
         m_inputs[i].releaseEvidenceMs = 0;
+        m_inputs[i].gripBridgeMs = 0;
         m_inputs[i].pressStartTime = 0;
         m_inputs[i].pressConsumed = false;
 
@@ -117,6 +118,7 @@ bool TouchController::begin() {
         m_inputs[i].lastChangeTime = 0;
         m_inputs[i].lastSampleTime = 0;
         m_inputs[i].releaseEvidenceMs = 0;
+        m_inputs[i].gripBridgeMs = 0;
         m_inputs[i].pressStartTime = 0;
         m_inputs[i].pressConsumed = false;
     }
@@ -559,11 +561,31 @@ void TouchController::pollSensors() {
         // credit a long unobserved bus stall or a failed poll as a release.
         if (touched) {
             input.releaseEvidenceMs = 0;
+            input.gripBridgeMs = 0;
         } else if (!input.currentTouched && input.debouncedTouched) {
             uint32_t credit = elapsed <= TOUCH_RELEASE_MAX_SAMPLE_GAP_MS ? elapsed : 0;
-            uint32_t evidence = input.releaseEvidenceMs + credit;
-            input.releaseEvidenceMs = static_cast<uint16_t>(
-                evidence < TOUCH_DEBOUNCE_RELEASE_MS ? evidence : TOUCH_DEBOUNCE_RELEASE_MS);
+
+            // A dip of the status bit with the delta still high is a hand that
+            // has not left (grip shifting, marginal signal), not a release.
+            // Costs one register read per poll, only while a held hold is in
+            // its release latch, and only until the bridge budget is spent. A
+            // failed read gives no bridge, i.e. the plain latch behavior.
+            bool gripping = false;
+            if (input.gripBridgeMs < TOUCH_GRIP_BRIDGE_MAX_MS) {
+                int8_t delta = 0;
+                gripping = readSensorValue(i, delta) && delta >= TOUCH_GRIP_DELTA_MIN;
+            }
+
+            if (gripping) {
+                uint32_t bridged = input.gripBridgeMs + credit;
+                input.gripBridgeMs = static_cast<uint16_t>(
+                    bridged < TOUCH_GRIP_BRIDGE_MAX_MS ? bridged : TOUCH_GRIP_BRIDGE_MAX_MS);
+                input.releaseEvidenceMs = 0;
+            } else {
+                uint32_t evidence = input.releaseEvidenceMs + credit;
+                input.releaseEvidenceMs = static_cast<uint16_t>(
+                    evidence < TOUCH_DEBOUNCE_RELEASE_MS ? evidence : TOUCH_DEBOUNCE_RELEASE_MS);
+            }
         }
 
         if (touched != m_inputs[i].currentTouched) {

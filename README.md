@@ -83,6 +83,12 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   short dropouts never add up to a release. Failed I2C reads contribute no
   evidence. Host regressions cover repeated dropouts, arming during a dropout,
   and independent release detection for double-hold steps.
+- **Grip bridging:** a dip of the CAP1188 status bit while the delta count is
+  still high (`TOUCH_GRIP_DELTA_MIN`, 24) is a hand that has not left, so it
+  gives no release evidence, even beyond the 500 ms latch. The bridge is
+  limited to `TOUCH_GRIP_BRIDGE_MAX_MS` (1 s) per untouched run, after which the
+  normal 500 ms evidence applies. A clean release (delta near 0) is reported
+  exactly as before. No protocol change.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 

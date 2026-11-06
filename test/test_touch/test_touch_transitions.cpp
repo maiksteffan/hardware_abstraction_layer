@@ -92,6 +92,14 @@ static void contact(uint8_t input, bool touched) {
     Wire.registers[address][CAP1188_REG_SENSOR_INPUT_DELTA_1 + mapping.channel] = touched ? 100 : 0;
 }
 
+static void setDelta(uint8_t input, int8_t delta) {
+    const BoardProfile& profile = activeBoardProfile();
+    const InputMapping& mapping = profile.inputMappings[input];
+    uint8_t address = profile.sensorAddresses[mapping.sensorIndex];
+    Wire.registers[address][CAP1188_REG_SENSOR_INPUT_DELTA_1 + mapping.channel] =
+        static_cast<uint8_t>(delta);
+}
+
 static void expectEvent(uint8_t index, EventType type, uint32_t id, const char* position = "") {
     TEST_ASSERT_GREATER_THAN(index, g_count);
     TEST_ASSERT_EQUAL(static_cast<uint8_t>(type), static_cast<uint8_t>(g_events[index].type));
@@ -645,6 +653,93 @@ void test_double_hold_time_filters_each_holds_dropouts_independently() {
     expectEvent(3, EventType::TOUCH_RELEASED, 342, "H01");
 }
 
+void test_gap_with_gripping_delta_is_bridged_beyond_the_release_latch() {
+    g_touch.setExpectDown(0, 350);
+    contact(0, true);
+    advance(10);
+    g_touch.setExpectUp(0, 351);
+
+    // Status bit off, but the hand is still on: delta stays far above ~0.
+    // Repeated gaps longer than the 500 ms latch must not release the hold.
+    for (uint8_t cycle = 0; cycle < 5; cycle++) {
+        contact(0, false);
+        setDelta(0, TOUCH_GRIP_DELTA_MIN + 10);
+        advance(TOUCH_DEBOUNCE_RELEASE_MS + 300);
+        TEST_ASSERT_TRUE(g_touch.isTouched(0));
+        TEST_ASSERT_EQUAL_UINT8(1, g_count);
+        contact(0, true);  // A confirmed contact starts a fresh budget.
+        advance(TOUCH_POLL_INTERVAL_MS);
+    }
+
+    // A real release (delta back near zero) is confirmed after the plain latch.
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS - TOUCH_POLL_INTERVAL_MS);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    advance(2 * TOUCH_POLL_INTERVAL_MS);
+    expectEvent(1, EventType::TOUCH_RELEASED, 351, "H01");
+    advance(500);
+    TEST_ASSERT_EQUAL_UINT8(2, g_count);
+}
+
+void test_clear_release_is_not_delayed_by_grip_bridge() {
+    g_touch.setExpectDown(0, 360);
+    contact(0, true);
+    advance(10);
+    g_touch.setExpectUp(0, 361);
+    contact(0, false);  // delta 0: nobody is on the hold any more
+    uint32_t start = g_now;
+    while (g_count < 2 && g_now - start < 2000) advance(TOUCH_POLL_INTERVAL_MS);
+    expectEvent(1, EventType::TOUCH_RELEASED, 361, "H01");
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(TOUCH_DEBOUNCE_RELEASE_MS + 2 * TOUCH_POLL_INTERVAL_MS,
+                                     g_now - start);
+}
+
+void test_stuck_high_delta_cannot_pin_a_hold_forever() {
+    g_touch.setExpectDown(0, 370);
+    contact(0, true);
+    advance(10);
+    g_touch.setExpectUp(0, 371);
+    contact(0, false);
+    setDelta(0, TOUCH_GRIP_DELTA_MIN + 30);  // never decays
+    advance(TOUCH_GRIP_BRIDGE_MAX_MS - TOUCH_POLL_INTERVAL_MS);
+    TEST_ASSERT_TRUE(g_touch.isTouched(0));
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 4 * TOUCH_POLL_INTERVAL_MS);
+    TEST_ASSERT_FALSE(g_touch.isTouched(0));
+    expectEvent(1, EventType::TOUCH_RELEASED, 371, "H01");
+    advance(500);
+    TEST_ASSERT_EQUAL_UINT8(2, g_count);
+}
+
+void test_weak_delta_below_grip_level_does_not_bridge() {
+    g_touch.setExpectDown(0, 380);
+    contact(0, true);
+    advance(10);
+    g_touch.setExpectUp(0, 381);
+    contact(0, false);
+    setDelta(0, TOUCH_GRIP_DELTA_MIN - 1);  // residual noise, not a hand
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 2 * TOUCH_POLL_INTERVAL_MS);
+    expectEvent(1, EventType::TOUCH_RELEASED, 381, "H01");
+}
+
+void test_double_hold_bridges_the_gripping_hold_only() {
+    g_touch.setExpectDown(0, 390);
+    g_touch.setExpectDown(1, 391);
+    contact(0, true);
+    contact(1, true);
+    advance(10);
+    g_touch.setExpectUp(0, 392);
+    g_touch.setExpectUp(1, 393);
+    contact(0, false);
+    setDelta(0, TOUCH_GRIP_DELTA_MIN + 20);  // H01: signal dip, hand still on
+    contact(1, false);                       // H02: real release
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 2 * TOUCH_POLL_INTERVAL_MS);
+    TEST_ASSERT_TRUE(g_touch.isTouched(0));
+    TEST_ASSERT_FALSE(g_touch.isTouched(1));
+    TEST_ASSERT_EQUAL_UINT8(3, g_count);
+    expectEvent(2, EventType::TOUCH_RELEASED, 393, "H02");
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_next_hold_grabbed_before_expect_any_is_not_lost);
@@ -683,6 +778,11 @@ int main() {
     RUN_TEST(test_hold_time_ignores_repeated_short_sensor_dropouts);
     RUN_TEST(test_hold_time_release_armed_during_dropout_does_not_fire_early);
     RUN_TEST(test_double_hold_time_filters_each_holds_dropouts_independently);
+    RUN_TEST(test_gap_with_gripping_delta_is_bridged_beyond_the_release_latch);
+    RUN_TEST(test_clear_release_is_not_delayed_by_grip_bridge);
+    RUN_TEST(test_stuck_high_delta_cannot_pin_a_hold_forever);
+    RUN_TEST(test_weak_delta_below_grip_level_does_not_bridge);
+    RUN_TEST(test_double_hold_bridges_the_gripping_hold_only);
     return UNITY_END();
 }
 

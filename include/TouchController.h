@@ -42,6 +42,7 @@ struct TouchInputState {
     uint32_t lastChangeTime;
     uint32_t lastSampleTime;      // Includes failed polls; long gaps are never credited
     uint16_t releaseEvidenceMs;   // Untouched evidence; failed reads pause, never restart it
+    uint16_t gripBridgeMs;        // Untouched time bridged by a still-high delta (bounded per run)
     uint32_t pressStartTime;   // millis() of the last debounced press edge
     bool pressConsumed;        // Current press already satisfied an EXPECT/EXPECT_ANY;
                                // requires release + re-grab before it can satisfy another

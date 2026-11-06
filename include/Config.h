@@ -160,6 +160,18 @@ constexpr uint16_t TOUCH_RELEASE_MAX_SAMPLE_GAP_MS = TOUCH_POLL_INTERVAL_MS * 10
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
 constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 500;   // observed release evidence; not a global touch lockout
 
+// Grip bridging. The CAP1188 status bit drops as soon as the delta count dips
+// under the chip threshold (default 0x40 = 64), but a hand that is still on the
+// hold only dips a little: the delta stays well above the ~0 of a real release.
+// While the status bit is off, a delta of at least TOUCH_GRIP_DELTA_MIN is
+// therefore treated as "still gripping" and gives NO release evidence, however
+// long the dip lasts. This keeps long holds from being cut by gaps longer than
+// the release latch without making a clean release any slower. The bridge is
+// bounded per untouched run, so a stuck-high delta can never pin a hold forever:
+// after TOUCH_GRIP_BRIDGE_MAX_MS the normal release evidence starts counting.
+constexpr int8_t   TOUCH_GRIP_DELTA_MIN       = 24;
+constexpr uint16_t TOUCH_GRIP_BRIDGE_MAX_MS   = 1000;
+
 // ----------------------------------------------------------------------------
 // 6b. EXPECT_ANY QUALIFICATION (brush-by rejection for climbing holds)
 // ----------------------------------------------------------------------------
