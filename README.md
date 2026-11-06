@@ -131,7 +131,46 @@ a separate monitor—two readers on one serial port would invalidate the diagnos
 
 ## Updates in the field
 
+Current firmware: **1.3.4**.
+
 The Pi's admin panel flashes new firmware automatically: it downloads the
 `firmware-merged.bin` asset from this repo's latest GitHub release, writes it
 with `esptool`, and verifies the version via the `INFO` command. Bump
 `FIRMWARE_VERSION` in `include/Config.h` to match the release tag.
+
+### One-command releases
+
+Commit your firmware changes and the release tooling first, then run from the
+repository root:
+
+```bash
+./release.sh --dry-run       # safe preview: no changes or network operations
+./release.sh                 # increment patch version and confirm with "yes"
+./release.sh --version 1.4.0  # optional explicit, strictly newer version
+```
+
+The script releases the **current branch**, not necessarily master. It updates
+the firmware version, this page and the living system document; runs native
+tests and builds both MCUs; commits and tags the exact same version; and pushes
+the current branch and tag atomically. It requires a clean working tree, git,
+perl and PlatformIO (PATH or `~/.platformio/penv/bin/pio`). `--yes` skips only
+the confirmation. Dry runs allow uncommitted files and report them as blockers
+for a real release; remote tag availability is checked only for real releases.
+
+If validation fails before a commit, the script restores its metadata edits.
+If a push fails, it keeps the release commit/tag and prints the retry command;
+check GitHub first and retry that push rather than creating another version.
+It never force-pushes or replaces an existing tag.
+
+GitHub Actions produces and publishes the binaries **after its build succeeds**.
+Only then check for updates on the Pi. Do not manually publish an empty release
+while the build runs. This command does not flash hardware or merge into master.
+
+Test the release script itself without publishing anything:
+
+```bash
+bash test/release_script_test.sh
+```
+
+These regressions use disposable local Git repositories, local bare remotes and
+mocked PlatformIO commands; they never push to GitHub or flash hardware.

@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.3.0` |
+| `FIRMWARE_VERSION` | `1.3.4` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -373,7 +373,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.3.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.3.4 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -570,6 +570,19 @@ The Pi's `firmware_update_service.py` flashes over USB serial with esptool
 **Release checklist:** bump `FIRMWARE_VERSION` in Config.h to match the git
 tag, build, publish `firmware-merged.bin` (merged bootloader + partitions +
 app) as the release asset.
+
+**Release automation:** `./release.sh` prepares the next patch release from the
+current branch; `--version X.Y.Z` selects a newer version, `--yes` skips
+confirmation, and `--dry-run` previews without writes, builds or network calls.
+Real releases require a clean tree and committed firmware changes/tooling.
+The script updates Config.h, the README current-version marker and this file's
+metadata/INFO example/changelog, then runs native tests and both MCU builds.
+It verifies the committed version, creates a matching annotated tag and pushes
+branch/tag atomically without force. Pre-commit failures restore its metadata;
+failed pushes retain the commit/tag for a same-version retry. GitHub Actions
+publishes merged assets on success, not this script; the Pi cannot download a
+tag until that release exists. Never publish an empty release manually.
+No firmware behavior or protocol version changes accompany this tooling.
 
 ---
 
