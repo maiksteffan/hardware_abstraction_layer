@@ -391,8 +391,9 @@ size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection) {
 
     // Optional protocol extensions, comma-separated. The Pi only uses a
     // command family when its feature is listed here, so it can talk to older
-    // firmware without probing. snake = TRACK / SNAKE / SNAKE_OFF.
-    length = appendTo(buffer, size, length, " features=snake");
+    // firmware without probing. snake = TRACK / SNAKE / SNAKE_OFF,
+    // holdgauge = HOLD_GAUGE.
+    length = appendTo(buffer, size, length, " features=snake,holdgauge");
 
     if (withSelection) {
         const BoardProfile& profile = activeBoardProfile();

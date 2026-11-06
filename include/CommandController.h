@@ -14,6 +14,9 @@
  *   STOP_BLINK <pos> [#id]        - Stop blinking
  *   EXPAND_STEP <pos> [#id]       - Expand lit area by 1 LED on each side
  *   CONTRACT_STEP <pos> [#id]     - Contract lit area by 1 LED on each side
+ *   HOLD_GAUGE <pos> <0-100> [#id] - Green block scaled to that share of its full
+ *                                   width, as a hold-time gauge (100 = full SUCCESS
+ *                                   block, 0 = center LED only). Absolute value
  *   MENUE_CHANGE <r,g,b> <range>  - Expand animation on both strips from 0 to range
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
  *   DEFEAT_ANIMATION [#id]        - Play defeat animation (red full-board pulses)
@@ -72,6 +75,7 @@ enum class CommandAction : uint8_t {
     STOP_BLINK,
     EXPAND_STEP,
     CONTRACT_STEP,
+    HOLD_GAUGE,
     MENUE_CHANGE,
     EXPECT,
     EXPECT_ANY,
@@ -107,7 +111,7 @@ struct ParsedCommand {
     uint8_t positionIndex;                  // 0..holdCount-1 (255 = invalid)
     bool hasId;
     uint32_t id;
-    uint8_t extraValue;  // For commands that need an extra numeric parameter (e.g., sensitivity level)
+    uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE percent)
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
     int32_t snakeStart;  // SNAKE: first track index (may be negative; clamped)

@@ -285,6 +285,7 @@ void test_a_zero_length_buffer_writes_nothing() {
 // test_snake_track.cpp — built into the same binary, which is why this file
 // is the one that includes BoardProfiles.cpp.
 void runSnakeTrackTests();
+void runHoldGaugeTests();
 
 int main() {
     UNITY_BEGIN();
@@ -313,6 +314,7 @@ int main() {
     RUN_TEST(test_a_zero_length_buffer_writes_nothing);
 
     runSnakeTrackTests();
+    runHoldGaugeTests();
 
     return UNITY_END();
 }

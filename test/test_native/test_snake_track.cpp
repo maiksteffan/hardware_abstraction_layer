@@ -261,8 +261,10 @@ static void test_info_announces_the_snake_feature() {
     char line[EVENT_MESSAGE_BUFFER_SIZE];
     buildBoardInfoLine(line, sizeof(line), false);
     TEST_ASSERT_NOT_NULL(strstr(line, " features=snake"));
+    TEST_ASSERT_NOT_NULL(strstr(line, "holdgauge"));
     buildBoardInfoLine(line, sizeof(line), true);
     TEST_ASSERT_NOT_NULL(strstr(line, " features=snake"));
+    TEST_ASSERT_NOT_NULL(strstr(line, "holdgauge"));
 }
 
 // ---------------------------------------------------------------------------
