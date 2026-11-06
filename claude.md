@@ -492,6 +492,16 @@ while watching `EXPECT_RELEASE`; letting go restarts the time, and the next
 hold is only shown once it is served. Steps without a hold time behave exactly
 as before — no `HOLD_GAUGE` is sent at all.
 
+**Required dropout handling:** countdown code must restart only on the debounced
+`TOUCH_RELEASED` reply, never on the first raw no-touch sample. The existing
+500 ms release-evidence filter (§2.5) discards all accumulated negative evidence
+on any valid positive touch sample, so separate brief dropouts cannot add up to
+a release. I2C read failures contribute no evidence. Native touch regressions
+verify repeated 5–495 ms dropouts over multiple seconds, arming `EXPECT_RELEASE`
+during a dropout, and independent filtering of double-hold steps. These tests
+verify existing firmware behavior, not the Pi countdown implementation or
+physical sensor stability; no production behavior or firmware version changed.
+
 **Victory:** all steps done → `SEQUENCE_COMPLETED` (full-board pulses) +
 `sequence_complete` broadcast.
 

@@ -573,6 +573,78 @@ void test_occupancy_delivery_retries_without_blocking_poll() {
     expectEvent(1, EventType::HANDS_OFF, COMMAND_ID_NONE);
 }
 
+void test_hold_time_ignores_repeated_short_sensor_dropouts() {
+    g_touch.setExpectDown(0, 320);
+    contact(0, true);
+    advance(10);
+    expectEvent(0, EventType::TOUCHED, 320, "H01");
+    g_touch.setExpectUp(0, 321);
+
+    // More than 500ms of negatives in TOTAL must not reset a hold-time timer.
+    // Each confirmed contact breaks the release streak, even for one poll.
+    const uint16_t dropouts[] = {5, 20, 100, 300, 495};
+    for (uint8_t cycle = 0; cycle < 4; cycle++) {
+        for (uint16_t dropout : dropouts) {
+            contact(0, false);
+            advance(dropout);
+            TEST_ASSERT_TRUE(g_touch.isTouched(0));
+            TEST_ASSERT_EQUAL_UINT8(1, g_count);
+            contact(0, true);
+            advance(TOUCH_POLL_INTERVAL_MS);
+        }
+    }
+
+    // Only a sustained release may notify the Pi to restart its countdown.
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + TOUCH_POLL_INTERVAL_MS);
+    TEST_ASSERT_FALSE(g_touch.isTouched(0));
+    expectEvent(1, EventType::TOUCH_RELEASED, 321, "H01");
+    advance(500);
+    TEST_ASSERT_EQUAL_UINT8(2, g_count);
+}
+
+void test_hold_time_release_armed_during_dropout_does_not_fire_early() {
+    g_touch.setExpectDown(0, 330);
+    contact(0, true);
+    advance(10);
+    contact(0, false);
+    advance(10);
+    // SUCCESS may finish and the Pi arm EXPECT_RELEASE during a noisy sample.
+    g_touch.setExpectUp(0, 331);
+    advance(100);
+    TEST_ASSERT_TRUE(g_touch.isTouched(0));
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    contact(0, true);
+    advance(TOUCH_POLL_INTERVAL_MS);
+    contact(0, false);
+    advance(400);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS);
+    expectEvent(1, EventType::TOUCH_RELEASED, 331, "H01");
+}
+
+void test_double_hold_time_filters_each_holds_dropouts_independently() {
+    g_touch.setExpectDown(0, 340);
+    g_touch.setExpectDown(1, 341);
+    contact(0, true);
+    contact(1, true);
+    advance(10);
+    g_touch.setExpectUp(0, 342);
+    g_touch.setExpectUp(1, 343);
+    contact(0, false); // Noise on H01.
+    contact(1, false); // Real release on H02.
+    advance(200);
+    contact(0, true);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS);
+    TEST_ASSERT_TRUE(g_touch.isTouched(0));
+    TEST_ASSERT_FALSE(g_touch.isTouched(1));
+    TEST_ASSERT_EQUAL_UINT8(3, g_count);
+    expectEvent(2, EventType::TOUCH_RELEASED, 343, "H02");
+    contact(0, false);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + TOUCH_POLL_INTERVAL_MS);
+    expectEvent(3, EventType::TOUCH_RELEASED, 342, "H01");
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_next_hold_grabbed_before_expect_any_is_not_lost);
@@ -608,6 +680,9 @@ int main() {
     RUN_TEST(test_touch_state_explains_consumed_and_release_latched_input);
     RUN_TEST(test_touch_state_retries_without_reading_deltas_or_consuming_touch);
     RUN_TEST(test_occupancy_delivery_retries_without_blocking_poll);
+    RUN_TEST(test_hold_time_ignores_repeated_short_sensor_dropouts);
+    RUN_TEST(test_hold_time_release_armed_during_dropout_does_not_fire_early);
+    RUN_TEST(test_double_hold_time_filters_each_holds_dropouts_independently);
     return UNITY_END();
 }
 

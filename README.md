@@ -73,6 +73,13 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   from the center outward, so a workout can show how much longer the hold must
   stay gripped. The Pi owns the clock and ticks the percentage down; `INFO`
   announces support as `features=holdgauge`.
+- **Hold-time release filtering:** countdown code must wait for the debounced
+  `TOUCH_RELEASED` event from `EXPECT_RELEASE`, not reset on a raw negative
+  sensor reading. The existing release filter requires 500 ms of observed
+  no-touch evidence; every valid touch reading resets that evidence. Separate
+  short dropouts never add up to a release. Failed I2C reads contribute no
+  evidence. Host regressions cover repeated dropouts, arming during a dropout,
+  and independent release detection for double-hold steps.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 
