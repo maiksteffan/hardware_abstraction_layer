@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.3.9` |
+| `FIRMWARE_VERSION` | `1.3.10` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -388,7 +388,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.3.9 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.3.10 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -690,6 +690,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.3.10 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.9 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.8 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.6 | Default CAP1188 sensitivity changed 2 → 4 (less sensitive). Applied per chip at initialization; existing SET_SENSITIVITY runtime overrides remain supported. Threshold, debounce, protocol and gameplay timing unchanged. |
