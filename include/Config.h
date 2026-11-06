@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.3.5"
+#define FIRMWARE_VERSION "1.3.7"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -323,7 +323,7 @@ constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
 // Sensitivity level written to every chip at init (bits 6:4 of reg 0x1F).
 // 0 = most sensitive (128x) ... 7 = least sensitive (1x). Chip default is 2.
 // Can still be changed at runtime per chip via SET_SENSITIVITY.
-constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 2;
+constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 4;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
 

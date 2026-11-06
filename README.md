@@ -63,6 +63,9 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   status reads pause release evidence instead of restarting the whole latch;
   periodic errors therefore cannot keep an otherwise released hold consumed
   forever. Recording delta reads are skipped when no `EXPECT_ANY` is armed.
+- **Sensor sensitivity:** default CAP1188 level is 4 (0 is most sensitive,
+  7 least sensitive). Applied per chip at initialization; `SET_SENSITIVITY`
+  can override it at runtime for every hold on that chip.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its
@@ -131,7 +134,7 @@ a separate monitor—two readers on one serial port would invalidate the diagnos
 
 ## Updates in the field
 
-Current firmware: **1.3.5**.
+Current firmware: **1.3.6**.
 
 The Pi's admin panel flashes new firmware automatically: it downloads the
 `firmware-merged.bin` asset from this repo's latest GitHub release, writes it
