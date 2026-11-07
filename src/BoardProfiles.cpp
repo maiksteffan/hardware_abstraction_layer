@@ -125,37 +125,37 @@ static const LedMapping V2_LED_MAPPINGS[] = {
     { StripId::STRIP1, 154 },  //H08
     { StripId::STRIP1, 165 },  //H09
     { StripId::STRIP1, 175 },  //H10
-    { StripId::STRIP2, 180 },  //H11
-    { StripId::STRIP2, 165 },  //H12
+    { StripId::STRIP2, 176 },  //H11
+    { StripId::STRIP2, 163 },  //H12
     { StripId::STRIP2, 152 },  //H13
-    { StripId::STRIP1, 124 },  //H14
+    { StripId::STRIP1, 130 },  //H14
     { StripId::STRIP1, 119 },  //H15
     { StripId::STRIP1, 109 },  //H16
     { StripId::STRIP1, 99  },  //H17
-    { StripId::STRIP2, 104 },  //H18
-    { StripId::STRIP2, 108 },  //H19
-    { StripId::STRIP2, 117 },  //H20
+    { StripId::STRIP2, 98 },  //H18
+    { StripId::STRIP2, 107 },  //H19
+    { StripId::STRIP2, 115 },  //H20
     { StripId::STRIP2, 128 },  //H21
-    { StripId::STRIP1, 51  },  //H22
+    { StripId::STRIP1, 52  },  //H22
     { StripId::STRIP1, 63  },  //H23
     { StripId::STRIP1, 72  },  //H24
     { StripId::STRIP1, 81  },  //H25
-    { StripId::STRIP2, 86  },  //H26
+    { StripId::STRIP2, 82  },  //H26
     { StripId::STRIP2, 72  },  //H27
-    { StripId::STRIP2, 62  },  //H28
+    { StripId::STRIP2, 63  },  //H28
     { StripId::STRIP2, 54  },  //H29
-    { StripId::STRIP1, 26  },  //H30
+    { StripId::STRIP1, 32  },  //H30
     { StripId::STRIP1, 21  },  //H31
     { StripId::STRIP1, 10  },  //H32
-    { StripId::STRIP2, 15  },  //H33
-    { StripId::STRIP2, 20  },  //H34
-    { StripId::STRIP2, 30  },  //H35
+    { StripId::STRIP2, 9  },  //H33
+    { StripId::STRIP2, 22  },  //H34
+    { StripId::STRIP2, 32  },  //H35
 };
 
 // ---- LED mirrors ----
 // Only H04 is doubled here; v1's second mirror (H19) is not wired on this build.
 static const LedMirror V2_LED_MIRRORS[] = {
-    { 3, StripId::STRIP2, 190 },  // H04 -> mirror on strip 2
+    { 3, StripId::STRIP2, 189 },  // H04 -> mirror on strip 2
 };
 
 // ============================================================================
