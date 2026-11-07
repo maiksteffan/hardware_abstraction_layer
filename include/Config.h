@@ -158,7 +158,7 @@ constexpr uint16_t TOUCH_RELEASE_MAX_SAMPLE_GAP_MS = TOUCH_POLL_INTERVAL_MS * 10
 // rather than erases progress. Long gaps never count as release evidence.
 // The evidence is per hold, independent of other holds and event delivery.
 constexpr uint16_t TOUCH_DEBOUNCE_PRESS_MS   = 0;     // instant — fire on first sample
-constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 500;   // observed release evidence; not a global touch lockout
+constexpr uint16_t TOUCH_DEBOUNCE_RELEASE_MS = 1000;  // observed release evidence; not a global touch lockout
 
 // Grip bridging. The CAP1188 status bit drops as soon as the delta count dips
 // under the chip threshold (default 0x40 = 64), but a hand that is still on the

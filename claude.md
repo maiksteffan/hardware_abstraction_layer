@@ -169,7 +169,7 @@ Runs on Core 0 every 5 ms:
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
 **Debounce (asymmetric):** press is instant (`TOUCH_DEBOUNCE_PRESS_MS` = 0);
-release is latched `TOUCH_DEBOUNCE_RELEASE_MS` = 500 ms — transient
+release is latched `TOUCH_DEBOUNCE_RELEASE_MS` = 1000 ms — transient
 re-contacts keep the touch held. Release timers are per hold, so releasing
 one hold never blocks another hold's press. Since 1.2.5, release uses
 `releaseEvidenceMs`: a valid untouched poll contributes its actual sample
@@ -268,19 +268,19 @@ the delta count falls under the chip threshold (default 64), but a hand that is
 still on the hold only dips; a real release goes to ~0. While a debounced-held
 input reads raw-untouched, `pollSensors()` reads its delta register (one read
 per poll, only in that state); `delta >= TOUCH_GRIP_DELTA_MIN` (24) counts as
-"still gripping": no release evidence, even beyond the 500 ms latch. Budget:
+"still gripping": no release evidence, even beyond the 1000 ms latch. Budget:
 `gripBridgeMs` ≤ `TOUCH_GRIP_BRIDGE_MAX_MS` (1000) per consecutive untouched run
-(reset by any touched sample), then the normal 500 ms evidence runs, so a stuck
+(reset by any touched sample), then the normal 1000 ms evidence runs, so a stuck
 delta delays a release by at most ~1.5 s. Clean releases (delta < 24) behave
-exactly as before (500 ms after the first untouched sample); a failed delta read
+exactly as before (1000 ms after the first untouched sample); a failed delta read
 falls back to plain latch behavior. Thresholds are untested on hardware: tune the
 two constants in Config.h from `VALUE <pos>` readings taken during a gap.
-Trade-off for the Pi: `TOUCH_RELEASED` arrives ≥500 ms after the physical
+Trade-off for the Pi: `TOUCH_RELEASED` arrives ≥1000 ms after the physical
 release; judge "released too early" against arrival time minus ~0.5 s.
 
 **Hands-off detection:** while enabled, emits `HANDS_ON`/`HANDS_OFF` on
 board-occupancy transitions; enabling reports the current state immediately.
-The 500 ms release latch means `HANDS_OFF` lags the last release by ~0.5 s.
+The 1000 ms release latch means `HANDS_OFF` lags the last release by ~1 s.
 Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
 
 ## 2.6 LED system
