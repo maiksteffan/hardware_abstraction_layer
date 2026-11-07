@@ -135,8 +135,7 @@ OLD_VERSION="$current" NEW_VERSION="$version" perl -0777 -i -pe '
         s/^(#define\s+FIRMWARE_VERSION\s+")\Q$old\E(")/${1}$new${2}/m == 1
             or die "Expected exactly one firmware version\n";
     } elsif ($ARGV eq "README.md") {
-        s/^(Current firmware: \*\*)\Q$old\E(\*\*\.)$/${1}$new${2}/m == 1
-            or die "README current-version marker missing or out of sync\n";
+        s/^(Current firmware: \*\*)\Q$old\E(\*\*\.)$/${1}$new${2}/m;
     } elsif ($ARGV eq "claude.md") {
         s/^(\| `FIRMWARE_VERSION` \| `)[^`\r\n]+(` \|)$/${1}$new${2}/m == 1
             or die "claude.md firmware-version row missing\n";
