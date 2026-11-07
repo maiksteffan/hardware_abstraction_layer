@@ -140,7 +140,7 @@ a separate monitor—two readers on one serial port would invalidate the diagnos
 
 ## Updates in the field
 
-Current firmware: **1.3.13**.
+Current firmware: **1.3.14**.
 
 The Pi's admin panel flashes new firmware automatically: it downloads the
 `firmware-merged.bin` asset from this repo's latest GitHub release, writes it
