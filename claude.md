@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.3.17` |
+| `FIRMWARE_VERSION` | `1.3.18` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -652,6 +652,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.3.18 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.17 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.0 | Hold-time gauge: new `HOLD_GAUGE <pos> <0-100>` lights a hold's green block from the center outward (core + success rings as one run of LEDs, 7 levels on a 5-LED core), so the Pi can show how much longer a hold must stay gripped during a workout step. Absolute value, no firmware-side timer; new static `PositionState::GAUGE` that SHOW/SUCCESS/FAIL/HIDE/HIDE_ALL clear and the snake repaints over. Geometry in the pure, host-tested `HoldGauge.h`; `INFO` gains `features=holdgauge` |
 | 1.2.5 | Address replay lockout paths missed by zero-latency host mocks: periodic I2C failures now pause rather than restart observed release evidence, while valid re-contact still resets it; polling-core touch/release/occupancy delivery uses zero-wait mutex acquisition and retries; skip EXPECT_ANY delta reads while no ANY request is queued. Add non-mutating `TOUCH_STATE <pos>` diagnostic to expose the actual sensor/consumption/expectation gate before recalibration. Add periodic-error, mutex-time, replay-I2C, release-evidence and diagnostic regressions. Preserve 500 ms evidence threshold, single-consumption and existing protocol messages. Physical cause on the reported board remains unverified |
