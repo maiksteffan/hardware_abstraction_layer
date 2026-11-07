@@ -170,10 +170,10 @@ static void test_v2_holds_sit_where_their_leds_are() {
     TEST_ASSERT_EQUAL_UINT8(1, holdTrackIndices(v2, 0, t));
     TEST_ASSERT_EQUAL_UINT16(485, t[0]);
 
-    // H04 = STRIP1 190, mirrored onto STRIP2 195 — primary first
+    // H04 = STRIP1 190, mirrored onto STRIP2 190 — primary first
     TEST_ASSERT_EQUAL_UINT8(2, holdTrackIndices(v2, 3, t));
     TEST_ASSERT_EQUAL_UINT16(450, t[0]);
-    TEST_ASSERT_EQUAL_UINT16(64, t[1]);
+    TEST_ASSERT_EQUAL_UINT16(69, t[1]);
 
     // H19 is mirrored on v1 only
     TEST_ASSERT_EQUAL_UINT8(1, holdTrackIndices(v2, 18, t));
