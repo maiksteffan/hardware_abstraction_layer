@@ -74,6 +74,9 @@ void LedController::begin() {
         m_positions[i].gaugeLevel = 0;
         setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     }
+    // Offsets belong to the board the Pi describes after connecting, never to
+    // a previous session.
+    m_ledOffsets.clear();
     
     m_sequenceAnimActive = false;
     m_defeatAnimActive = false;
@@ -363,9 +366,9 @@ void LedController::paintGaugeLed(uint8_t position, int16_t offset, uint8_t r, u
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
 
-    setLed(mapping->strip, (int16_t)mapping->index + offset, r, g, b);
+    setLed(mapping->strip, ledIndex(position, mapping->strip, mapping->index) + offset, r, g, b);
     const LedMirror* mirror = getMirror(position);
-    if (mirror) setLed(mirror->strip, (int16_t)mirror->index + offset, r, g, b);
+    if (mirror) setLed(mirror->strip, ledIndex(position, mirror->strip, mirror->index) + offset, r, g, b);
 }
 
 void LedController::paintGauge(uint8_t position, uint8_t level) {
@@ -540,12 +543,10 @@ void LedController::paintSnake() {
     }
 }
 
-bool LedController::positionTouchesTrackSpan(uint8_t position, uint16_t start, uint16_t end) const {
+uint8_t LedController::positionTrackSpans(uint8_t position, uint16_t lo[2], uint16_t hi[2]) const {
     const PositionData& data = m_positions[position];
-    if (data.state == PositionState::OFF) return false;
-
     const LedMapping* mapping = getMapping(position);
-    if (!mapping) return false;
+    if (!mapping) return 0;
 
     // Widest the position can currently reach: its core plus any ring.
     int32_t reach = (activeBoardProfile().ledPositionWidth - 1) / 2;
@@ -566,18 +567,29 @@ bool LedController::positionTouchesTrackSpan(uint8_t position, uint16_t start, u
     }
 
     const BoardProfile& profile = activeBoardProfile();
-    uint16_t tLo, tHi;
-    if (stripSpanToTrack(profile, mapping->strip, (int32_t)mapping->index - reach,
-                         (int32_t)mapping->index + reach, tLo, tHi)
-        && tLo < end && tHi >= start) {
-        return true;
+    uint8_t count = 0;
+    const int32_t center = ledIndex(position, mapping->strip, mapping->index);
+    if (stripSpanToTrack(profile, mapping->strip, center - reach, center + reach, lo[count], hi[count])) {
+        count++;
     }
     const LedMirror* mirror = getMirror(position);
-    if (mirror
-        && stripSpanToTrack(profile, mirror->strip, (int32_t)mirror->index - reach,
-                            (int32_t)mirror->index + reach, tLo, tHi)
-        && tLo < end && tHi >= start) {
-        return true;
+    if (mirror) {
+        const int32_t mirrorCenter = ledIndex(position, mirror->strip, mirror->index);
+        if (stripSpanToTrack(profile, mirror->strip, mirrorCenter - reach, mirrorCenter + reach,
+                             lo[count], hi[count])) {
+            count++;
+        }
+    }
+    return count;
+}
+
+bool LedController::positionTouchesTrackSpan(uint8_t position, uint16_t start, uint16_t end) const {
+    if (m_positions[position].state == PositionState::OFF) return false;
+
+    uint16_t lo[2], hi[2];
+    const uint8_t count = positionTrackSpans(position, lo, hi);
+    for (uint8_t i = 0; i < count; i++) {
+        if (lo[i] < end && hi[i] >= start) return true;
     }
     return false;
 }
@@ -642,6 +654,41 @@ bool LedController::isBlinking(uint8_t position) const {
 }
 
 // ============================================================================
+// LED offset (per-board correction, see LedOffset.h)
+// ============================================================================
+
+bool LedController::setLedOffset(uint8_t position, int8_t offset) {
+    const BoardProfile& profile = activeBoardProfile();
+    if (!LedOffsets::accepts(profile, position, offset)) return false;
+    if (m_ledOffsets.get(position) == offset) return true;
+
+    // A lit block has to leave the LEDs it is on now, so remember them before
+    // the offset changes. The calibration screen relies on this: it shows the
+    // hold and nudges the offset until the block sits on it.
+    const bool lit = m_positions[position].state != PositionState::OFF;
+    uint16_t lo[2], hi[2];
+    const uint8_t spans = lit ? positionTrackSpans(position, lo, hi) : 0;
+
+    m_ledOffsets.set(profile, position, offset);
+
+    if (lit) {
+        // Dark where the block was, repainting any neighbour it overlapped —
+        // the same release a passing snake leaves behind — then the block at
+        // its new place. A running expansion carries on from there.
+        for (uint8_t i = 0; i < spans; i++) {
+            releaseTrackSpan(lo[i], (uint16_t)(hi[i] + 1));
+        }
+        repaintPosition(position);
+        m_needsUpdate = true;
+    }
+    return true;
+}
+
+int8_t LedController::ledOffset(uint8_t position) const {
+    return m_ledOffsets.get(position);
+}
+
+// ============================================================================
 // Private Methods
 // ============================================================================
 
@@ -658,6 +705,10 @@ const LedMirror* LedController::getMirror(uint8_t position) const {
     return nullptr;
 }
 
+int16_t LedController::ledIndex(uint8_t position, StripId strip, uint8_t index) const {
+    return (int16_t)shiftAlongTrack(strip, index, m_ledOffsets.get(position));
+}
+
 void LedController::paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b) {
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return;
@@ -668,16 +719,18 @@ void LedController::paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g
     // they never overlap it.
     const int16_t half = (int16_t)(activeBoardProfile().ledPositionWidth - 1) / 2;
     const LedMirror* mirror = getMirror(position);
+    const int16_t center = ledIndex(position, mapping->strip, mapping->index);
+    const int16_t mirrorCenter = mirror ? ledIndex(position, mirror->strip, mirror->index) : 0;
 
     if (offset == 0) {
         for (int16_t o = -half; o <= half; o++) {
-            setLed(mapping->strip, (int16_t)mapping->index + o, r, g, b);
-            if (mirror) setLed(mirror->strip, (int16_t)mirror->index + o, r, g, b);
+            setLed(mapping->strip, center + o, r, g, b);
+            if (mirror) setLed(mirror->strip, mirrorCenter + o, r, g, b);
         }
     } else {
         int16_t shifted = (offset > 0) ? offset + half : offset - half;
-        setLed(mapping->strip, (int16_t)mapping->index + shifted, r, g, b);
-        if (mirror) setLed(mirror->strip, (int16_t)mirror->index + shifted, r, g, b);
+        setLed(mapping->strip, center + shifted, r, g, b);
+        if (mirror) setLed(mirror->strip, mirrorCenter + shifted, r, g, b);
     }
 }
 

@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
 #include "Config.h"
+#include "LedOffset.h"
 
 // ============================================================================
 // Types
@@ -97,6 +98,15 @@ public:
     void snake(int32_t start, uint16_t length, uint8_t r, uint8_t g, uint8_t b);
     void snakeOff();
 
+    // Per-board correction of where a position's block sits, in LEDs along
+    // the track (see LedOffset.h). Held in RAM only: begin() resets every
+    // position to its profile index and the Pi sends its offsets again after
+    // each connect. A lit position moves at once. False, and nothing changes,
+    // when the offset is out of range or would push the block's center off
+    // its strip.
+    bool setLedOffset(uint8_t position, int8_t offset);
+    int8_t ledOffset(uint8_t position) const;
+
     // State queries
     bool isAnimationComplete(uint8_t position) const;
     bool isContractComplete(uint8_t position) const;
@@ -138,9 +148,20 @@ private:
     uint16_t m_snakeEnd;
     uint8_t m_snakeR, m_snakeG, m_snakeB;
     
+    // LED_OFFSET corrections, applied in ledIndex()
+    LedOffsets m_ledOffsets;
+
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
     const LedMirror* getMirror(uint8_t position) const;
+    // Where a mapped LED of this position really is: its profile index moved
+    // by the position's offset. Every lookup of a position's LED goes through
+    // here, so the offset cannot be forgotten in one of the paint paths.
+    int16_t ledIndex(uint8_t position, StripId strip, uint8_t index) const;
+    // Track spans the position's block covers right now (core plus whatever
+    // rings its state can reach), inclusive: primary first, then the mirror.
+    // Returns how many were written (0..2).
+    uint8_t positionTrackSpans(uint8_t position, uint16_t lo[2], uint16_t hi[2]) const;
     // Paint a logical position (primary LED + optional mirror) at the given
     // offset from its center. Used for solid colors and symmetric animations.
     void paint(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b);

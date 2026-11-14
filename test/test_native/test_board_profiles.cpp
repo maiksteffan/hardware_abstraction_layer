@@ -286,6 +286,7 @@ void test_a_zero_length_buffer_writes_nothing() {
 // is the one that includes BoardProfiles.cpp.
 void runSnakeTrackTests();
 void runHoldGaugeTests();
+void runLedOffsetTests();
 
 int main() {
     UNITY_BEGIN();
@@ -315,6 +316,7 @@ int main() {
 
     runSnakeTrackTests();
     runHoldGaugeTests();
+    runLedOffsetTests();
 
     return UNITY_END();
 }

@@ -86,18 +86,38 @@ inline bool stripSpanToTrack(const BoardProfile& profile, StripId strip, int32_t
     return true;
 }
 
+/// LED `index` on `strip`, moved `steps` LEDs along the track. Strip 2 runs
+/// backwards on the track, so a step forward is one index down there. The
+/// result may lie outside the strip; callers clip or refuse it.
+inline int32_t shiftAlongTrack(StripId strip, uint16_t index, int16_t steps) {
+    return (strip == StripId::STRIP2) ? (int32_t)index - steps : (int32_t)index + steps;
+}
+
+/// Track index of a physical LED after moving it `steps` along the track.
+/// False when that leaves the strip.
+inline bool shiftedLedToTrack(const BoardProfile& profile, StripId strip, uint16_t index,
+                              int16_t steps, uint16_t& t) {
+    const int32_t shifted = shiftAlongTrack(strip, index, steps);
+    if (shifted < 0) return false;
+    return stripToTrack(profile, strip, (uint16_t)shifted, t);
+}
+
 /// Track indices of a hold's block centre: its primary LED, then its mirror
 /// (from ledMirrors) when it has one. Returns how many were written (0..2);
 /// 0 for a hold the profile does not have.
-inline uint8_t holdTrackIndices(const BoardProfile& profile, uint8_t hold, uint16_t out[2]) {
+///
+/// `offset` is the board's own correction for this hold (LedOffset.h), in
+/// track LEDs: both indices move by it.
+inline uint8_t holdTrackIndices(const BoardProfile& profile, uint8_t hold, uint16_t out[2],
+                                int8_t offset = 0) {
     if (hold >= profile.holdCount) return 0;
     uint8_t count = 0;
     const LedMapping& led = profile.ledMappings[hold];
-    if (stripToTrack(profile, led.strip, led.index, out[count])) count++;
+    if (shiftedLedToTrack(profile, led.strip, led.index, offset, out[count])) count++;
     for (uint8_t m = 0; m < profile.ledMirrorCount; m++) {
         const LedMirror& mirror = profile.ledMirrors[m];
         if (mirror.position != hold) continue;
-        if (stripToTrack(profile, mirror.strip, mirror.index, out[count])) count++;
+        if (shiftedLedToTrack(profile, mirror.strip, mirror.index, offset, out[count])) count++;
         break;
     }
     return count;
@@ -118,12 +138,14 @@ inline size_t buildTrackHeaderLine(char* buffer, size_t size, const BoardProfile
 }
 
 /// `TRACK_HOLD H04 75` or, for a mirrored hold, `TRACK_HOLD H04 75,444`.
-/// Returns 0 (and writes "") for a hold the profile does not have.
-inline size_t buildTrackHoldLine(char* buffer, size_t size, const BoardProfile& profile, uint8_t hold) {
+/// Returns 0 (and writes "") for a hold the profile does not have. `offset`
+/// is the board's correction for the hold, see holdTrackIndices().
+inline size_t buildTrackHoldLine(char* buffer, size_t size, const BoardProfile& profile, uint8_t hold,
+                                 int8_t offset = 0) {
     if (!buffer || size == 0) return 0;
     buffer[0] = '\0';
     uint16_t t[2];
-    uint8_t count = holdTrackIndices(profile, hold, t);
+    uint8_t count = holdTrackIndices(profile, hold, t, offset);
     if (count == 0) return 0;
     int n = (count == 2)
         ? snprintf(buffer, size, "TRACK_HOLD H%02u %u,%u", (unsigned)(hold + 1), (unsigned)t[0], (unsigned)t[1])
