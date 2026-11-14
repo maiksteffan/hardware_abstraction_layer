@@ -352,6 +352,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "VALUE", len)) return CommandAction::VALUE;
     if (strcasecmpN(str, "TOUCH_STATE", len)) return CommandAction::TOUCH_STATE;
     if (strcasecmpN(str, "SET_SENSITIVITY", len)) return CommandAction::SET_SENSITIVITY;
+    if (strcasecmpN(str, "GET_SENSITIVITY", len)) return CommandAction::GET_SENSITIVITY;
     if (strcasecmpN(str, "SCAN", len)) return CommandAction::SCAN;
     if (strcasecmpN(str, "SEQUENCE_COMPLETED", len)) return CommandAction::SEQUENCE_COMPLETED;
     if (strcasecmpN(str, "DEFEAT_ANIMATION", len)) return CommandAction::DEFEAT_ANIMATION;
@@ -391,6 +392,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::VALUE: return "VALUE";
         case CommandAction::TOUCH_STATE: return "TOUCH_STATE";
         case CommandAction::SET_SENSITIVITY: return "SET_SENSITIVITY";
+        case CommandAction::GET_SENSITIVITY: return "GET_SENSITIVITY";
         case CommandAction::SCAN: return "SCAN";
         case CommandAction::SEQUENCE_COMPLETED: return "SEQUENCE_COMPLETED";
         case CommandAction::DEFEAT_ANIMATION: return "DEFEAT_ANIMATION";
@@ -426,6 +428,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::VALUE:
         case CommandAction::TOUCH_STATE:
         case CommandAction::SET_SENSITIVITY:
+        case CommandAction::GET_SENSITIVITY:
             return true;
         default:
             return false;
@@ -618,6 +621,20 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
                     m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
                 } else {
                     m_eventQueue.queueError("command_failed", cmdId);
+                }
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+            
+        case CommandAction::GET_SENSITIVITY:
+            if (m_touchController) {
+                // Answered like VALUE: the reply line itself, no ACK before it.
+                uint8_t level;
+                if (m_touchController->readSensitivity(cmd.positionIndex, level)) {
+                    m_eventQueue.queueSensitivity(cmd.position, level, cmdId);
+                } else {
+                    m_eventQueue.queueError("sensor_inactive", cmdId);
                 }
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);

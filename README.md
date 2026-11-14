@@ -77,6 +77,11 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   either way along the track, for a wall whose strip sits slightly off the
   profile. The Pi stores the correction per board and sends it after every
   boot; `INFO` announces support as `features=ledoffset`.
+- **Sensitivity:** `SET_SENSITIVITY <pos> <0-7>` sets and `GET_SENSITIVITY
+  <pos>` reads back the level a hold's CAP1188 runs at. One register per chip,
+  so the holds of a chip share it; RAM only, a boot restores the default and
+  the Pi sends its stored levels again.
+  `INFO` announces the read as `features=sensitivity`.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 

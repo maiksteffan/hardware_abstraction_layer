@@ -398,6 +398,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `VALUE <pos> [#id]` | `VALUE <pos> <delta> [#id]` | Signed delta register (-128..127) |
 | `TOUCH_STATE <pos> [#id]` | `ACK`, then `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` | Non-mutating polling-core diagnostic; `raw` is cached when `valid=0`; `expect`/`pending` refer to single-hold EXPECT. One outstanding request, newest replaces undelivered request |
 | `SET_SENSITIVITY <pos> <0-7> [#id]` | `ACK` | 0 = most sensitive. ⚠ Global per CAP1188 chip |
+| `GET_SENSITIVITY <pos> [#id]` | `SENSITIVITY <pos> <0-7> [#id]` | The level the position's chip runs at, read back from the chip — so also what a neighbour on the same chip last set. No `ACK`, like `VALUE`. `ERR sensor_inactive` when the sensor failed init or does not answer. Announced as `features=sensitivity` |
 | `HANDSOFF_DETECTION_ON [#id]` | `ACK` + immediate `HANDS_ON`/`HANDS_OFF` | Enable occupancy events, report current state once |
 | `HANDSOFF_DETECTION_OFF [#id]` | `ACK` | Disable occupancy events |
 
@@ -406,7 +407,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.4.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.4.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -417,14 +418,15 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|
 | `ACK` | `ACK <ACTION> [<pos>] [#id]` |
 | `DONE` | `DONE <ACTION> [<pos>] [#id]` |
-| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `unknown_board_version` (boot only) |
+| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `sensor_inactive` (`VALUE` / `GET_SENSITIVITY` on a sensor that does not answer), `unknown_board_version` (boot only) |
 | `BUSY` | `BUSY [#id]` (queue full — Pi retries) |
 | `TOUCHED` / `TOUCH_RELEASED` | `TOUCHED <pos> [#id]` |
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
+| `SENSITIVITY` | `SENSITIVITY <pos> <level> [#id]` — reply to `GET_SENSITIVITY` only |
 | `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0) |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
@@ -437,11 +439,20 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
   action-name prefix. Don't rely on it — keep new command names ≤ 15 chars.
 - **Id-less responses** are matched to the oldest pending command by action.
 
-## 3.5 Known gap
+## 3.5 Sensitivity is per chip, and RAM only
 
-- The Pi can send `GET_SENSITIVITY <pos> #id` (expects
-  `SENSITIVITY <pos> <lvl>`); the firmware does **not** implement it yet and
-  answers `ERR unknown_action`. Implement additively if needed.
+- A CAP1188 has one sensitivity register for all of its channels, so
+  `SET_SENSITIVITY` on one hold moves every hold on that chip, and
+  `GET_SENSITIVITY` reports the chip's level for whichever of its holds is
+  asked. The Pi sets and reads "all holds" by looping over the positions; no
+  bulk command exists.
+- The firmware stores nothing: every boot puts each chip back on
+  `CAP1188_DEFAULT_SENSITIVITY`. The Pi keeps the levels (SQLite, per profile
+  and hold) and sends them after every boot, like `LED_OFFSET` - in the order
+  they were set, so the hold set last decides its chip again.
+- Firmware before 1.5.0 answers `GET_SENSITIVITY` with an id-less
+  `ERR unknown_action`; the Pi therefore asks only when `INFO` lists
+  `features=sensitivity`.
 
 ## 3.6 Compatibility rules
 
@@ -570,7 +581,7 @@ mode: every hold is armed, so brush-bys during reaching must be filtered.
 | Sensor list | `GET /api/hardware/sensors` | `SCAN` |
 | Read sensor delta | `GET /api/hardware/sensor/{pos}/value` | `VALUE <pos>` |
 | Recalibrate one/all | `POST .../recalibrate`, `/api/hardware/calibrate` | `RECALIBRATE`, `RECALIBRATE_ALL` |
-| Sensitivity get/set | `GET/POST .../sensitivity` | `GET_SENSITIVITY` (⚠ not implemented in firmware), `SET_SENSITIVITY` |
+| Sensitivity get/set | `GET/POST .../sensor/{pos}/sensitivity`, all holds: `GET/POST /api/hardware/sensitivity` | `GET_SENSITIVITY`, `SET_SENSITIVITY` (all holds = one command per hold) |
 | LED tests | `/api/hardware/led/*` | `SHOW`, `HIDE_ALL`, `SUCCESS`, `FAIL`, `BLINK`, `SEQUENCE_COMPLETED`, `DEFEAT_ANIMATION` |
 | Connection check | `GET /api/hardware/ping` | `PING` |
 | Firmware update | admin UI trigger | esptool flash (§5) |
@@ -686,6 +697,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.5.0 | Sensitivity can be read back: new `GET_SENSITIVITY <pos>` answers `SENSITIVITY <pos> <0-7>` with the level the position's CAP1188 runs at (bits 6:4 of its sensitivity register), `ERR sensor_inactive` for a sensor that failed init or does not answer. The Pi already spoke the command; the firmware answered `ERR unknown_action` until now. `INFO` gains `features=sensitivity`. Every existing command is unchanged |
 | 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |
 | 1.3.19 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.3.18 | Automated release; see Git history and GitHub release notes for changes. |

@@ -184,6 +184,20 @@ bool TouchController::setSensitivity(uint8_t inputIndex, uint8_t level) {
     return writeRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, regValue);
 }
 
+bool TouchController::readSensitivity(uint8_t inputIndex, uint8_t& level) {
+    const BoardProfile& profile = activeBoardProfile();
+    if (inputIndex >= profile.holdCount) return false;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    if (s >= profile.sensorCount || !m_sensors[s].active) return false;
+
+    uint8_t regValue;
+    if (!readRegister(profile.sensorAddresses[s], CAP1188_REG_SENSITIVITY_CONTROL, regValue)) {
+        return false;
+    }
+    level = (uint8_t)((regValue >> 4) & 0x07);
+    return true;
+}
+
 void TouchController::setExpectDown(uint8_t inputIndex, uint32_t commandId) {
     if (inputIndex >= activeBoardProfile().holdCount) return;
     // Publish atomically; only the polling core may inspect/consume a press.
