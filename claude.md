@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.4.0` |
+| `FIRMWARE_VERSION` | `1.5.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -407,7 +407,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.4.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.5.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -697,6 +697,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.5.0 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.5.0 | Sensitivity can be read back: new `GET_SENSITIVITY <pos>` answers `SENSITIVITY <pos> <0-7>` with the level the position's CAP1188 runs at (bits 6:4 of its sensitivity register), `ERR sensor_inactive` for a sensor that failed init or does not answer. The Pi already spoke the command; the firmware answered `ERR unknown_action` until now. `INFO` gains `features=sensitivity`. Every existing command is unchanged |
 | 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |
 | 1.3.19 | Automated release; see Git history and GitHub release notes for changes. |
