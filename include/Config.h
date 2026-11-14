@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.3.15"
+#define FIRMWARE_VERSION "1.4.0"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -253,6 +253,12 @@ constexpr uint8_t LED_DEFEAT_PULSE_COUNT = 3;
 constexpr uint16_t LED_DEFEAT_PULSE_STEPS = 20;
 constexpr uint8_t LED_DEFEAT_MAX_BRIGHTNESS = 40;
 constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
+
+// Largest LED_OFFSET a hold accepts, in LEDs either way along the track. The
+// offset trims a block onto its hold; neighbouring holds sit 9-12 LEDs apart,
+// so anything beyond half of that is a wrong mapping, not a trim, and belongs
+// in the board profile. The Pi enforces the same bound.
+constexpr int8_t LED_OFFSET_MAX = 5;
 
 // ============================================================================
 // 8. COLORS (RGB format, 0-255 per channel)

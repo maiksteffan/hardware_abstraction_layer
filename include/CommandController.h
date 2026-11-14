@@ -17,6 +17,10 @@
  *   HOLD_GAUGE <pos> <0-100> [#id] - Green block scaled to that share of its full
  *                                   width, as a hold-time gauge (100 = full SUCCESS
  *                                   block, 0 = center LED only). Absolute value
+ *   LED_OFFSET <pos> <n> [#id]    - Move the position's block n LEDs along the track
+ *                                   (-LED_OFFSET_MAX..LED_OFFSET_MAX, 0 = the profile's
+ *                                   place). This board's own correction, sent by the Pi
+ *                                   after every connect; RAM only. See LedOffset.h
  *   MENUE_CHANGE <r,g,b> <range>  - Expand animation on both strips from 0 to range
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
  *   DEFEAT_ANIMATION [#id]        - Play defeat animation (red full-board pulses)
@@ -76,6 +80,7 @@ enum class CommandAction : uint8_t {
     EXPAND_STEP,
     CONTRACT_STEP,
     HOLD_GAUGE,
+    LED_OFFSET,
     MENUE_CHANGE,
     EXPECT,
     EXPECT_ANY,
@@ -112,6 +117,7 @@ struct ParsedCommand {
     bool hasId;
     uint32_t id;
     uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE percent)
+    int8_t ledOffset;    // LED_OFFSET: LEDs along the track, -LED_OFFSET_MAX..LED_OFFSET_MAX
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
     int32_t snakeStart;  // SNAKE: first track index (may be negative; clamped)

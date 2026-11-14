@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.3.0` |
+| `FIRMWARE_VERSION` | `1.4.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -274,6 +274,38 @@ when the hold time is over. `PositionState::GAUGE` is a static state — `SHOW`,
 `SUCCESS`, `FAIL`, `HIDE` and `HIDE_ALL` clear it like an expanded block, and
 the snake repaints over it as usual.
 
+### LED offset (per-board correction)
+
+A profile says which LED lights a hold on every board of that build. On one
+wall a block may still sit a few LEDs off — the strip glued a little further
+along, a hold bolted next to its mark. That is a property of a single board,
+so it is **not** a profile and not a new slug: the Pi keeps one small
+correction per hold and sends it after every boot
+(`LED_OFFSET <pos> <n>`). The firmware keeps it in RAM only
+(`LedOffsets`, [include/LedOffset.h](include/LedOffset.h), pure and
+host-tested), `LedController::begin()` clears it, and offset 0 is exactly the
+profile.
+
+- **Counted along the track**, not along the strip: +1 is index+1 on strip 1
+  and index-1 on strip 2 (`shiftAlongTrack()` in SnakeTrack.h). A mirrored
+  hold has one block on each strip and the strips run in opposite directions
+  past it; along the track both blocks move the same way on the wall.
+- **One lookup:** every place that needs a position's LED goes through
+  `LedController::ledIndex()` — `paint()`, the gauge, the snake's repaint
+  spans. Do not read `mapping->index` directly anywhere else.
+- **Bounded:** `-LED_OFFSET_MAX..LED_OFFSET_MAX` (5), and refused when the
+  center LED of the block or of its mirror would leave its strip. Anything
+  larger is a wrong mapping and belongs in the profile.
+- **Live:** changing the offset of a lit position releases the LEDs it was on
+  (repainting an overlapped neighbour, like a passing snake does) and repaints
+  it at the new place; a running expansion carries on from there. The Pi's
+  calibration screen relies on this: it shows the hold and nudges the offset.
+  The dim-white `INDICATE_RECORDING` glow is not a position state and only
+  moves with the next command that paints the position.
+- **`TRACK`** reports every hold's index with its offset applied, so the Pi's
+  snake runs where the blocks really are. The Pi asks for the track again
+  after changing an offset.
+
 ### Track & snake overlay
 
 For the Snake game both strips are chained into one line, the **track**
@@ -337,6 +369,7 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 | `BLINK <pos> [#id]` / `STOP_BLINK <pos> [#id]` | `ACK` | Green blink on/off |
 | `EXPAND_STEP <pos> [#id]` / `CONTRACT_STEP <pos> [#id]` | `ACK` | Grow/shrink lit area by 1 LED per side |
 | `HOLD_GAUGE <pos> <0-100> [#id]` | `ACK` | Green block scaled to that share of its full width (hold-time gauge, see 2.6). Absolute; 0 leaves the center LED on. Out of range → `ERR invalid_level`, missing value → `ERR bad_format`. Firmware with `features=holdgauge` only |
+| `LED_OFFSET <pos> <n> [#id]` | `ACK` | Move the hold's block `n` LEDs along the track, `-5..5`, sign optional (`-2`, `3`, `+3`); 0 = the profile's place (per-board correction, see 2.6). RAM only, cleared on boot. Missing or malformed value → `ERR bad_format`, beyond the bound → `ERR invalid_level` (both without id, like every parse error), block center off its strip → `ERR invalid_level #id`. Firmware with `features=ledoffset` only |
 | `INDICATE_RECORDING [#id]` | `ACK` | All holds static dim white |
 | `SUCCESS <pos> [#id]` | `ACK` → `DONE` | **Async**: green expansion animation |
 | `CONTRACT <pos> [#id]` | `ACK` → `DONE` | **Async**: contract expanded area |
@@ -373,10 +406,10 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.3.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.4.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
-| `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
+| `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
 
 ## 3.3 Responses & events (ESP32 → Pi)
 
@@ -391,7 +424,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `RECALIBRATED` | `RECALIBRATED <pos>\|ALL [#id]` (Pi treats it as the DONE) |
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
 | `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0) |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
@@ -629,6 +662,7 @@ hardware_abstraction_layer/
 │   ├── Config.h              # board-independent config: pins, timing, colors
 │   ├── BoardProfile.h        # per-board wiring types, ceilings, profile registry API
 │   ├── SnakeTrack.h          # both strips as one track (TRACK/SNAKE), pure, host-tested
+│   ├── LedOffset.h           # per-board LED corrections (LED_OFFSET), pure, host-tested
 │   ├── CommandController.h
 │   ├── EventQueue.h
 │   ├── LedController.h
@@ -652,6 +686,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |
 | 1.3.0 | Hold-time gauge: new `HOLD_GAUGE <pos> <0-100>` lights a hold's green block from the center outward (core + success rings as one run of LEDs, 7 levels on a 5-LED core), so the Pi can show how much longer a hold must stay gripped during a workout step. Absolute value, no firmware-side timer; new static `PositionState::GAUGE` that SHOW/SUCCESS/FAIL/HIDE/HIDE_ALL clear and the snake repaints over. Geometry in the pure, host-tested `HoldGauge.h`; `INFO` gains `features=holdgauge` |
 | 1.2.5 | Address replay lockout paths missed by zero-latency host mocks: periodic I2C failures now pause rather than restart observed release evidence, while valid re-contact still resets it; polling-core touch/release/occupancy delivery uses zero-wait mutex acquisition and retries; skip EXPECT_ANY delta reads while no ANY request is queued. Add non-mutating `TOUCH_STATE <pos>` diagnostic to expose the actual sensor/consumption/expectation gate before recalibration. Add periodic-error, mutex-time, replay-I2C, release-evidence and diagnostic regressions. Preserve 500 ms evidence threshold, single-consumption and existing protocol messages. Physical cause on the reported board remains unverified |
 | 1.2.4 | Fix missed single-hold touches at sequence start/mid-sequence: evaluate EXPECT/EXPECT_RELEASE on every sensor tick with synchronized registration instead of a command-side check-then-arm race; do not accept raw-untouched release-latched holds. Retain matched touch/release and qualified EXPECT_ANY reports across event queue rejection, with revision-safe completion and CLEAN_QUEUE cancellation. Preserve single-consumption, 2 s freshness, 500 ms release latch, protocol grammar and ids. Add event-delivery and expectation lifecycle regressions |

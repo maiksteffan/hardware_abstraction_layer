@@ -141,6 +141,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.hasId = false;
     cmd.id = COMMAND_ID_NONE;
     cmd.extraValue = 0;
+    cmd.ledOffset = 0;
     cmd.r = 0;
     cmd.g = 0;
     cmd.b = 0;
@@ -286,6 +287,33 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         p = skipWhitespace(p);
     }
     
+    // Parse the signed offset of LED_OFFSET. A missing or malformed number is
+    // bad_format; a well-formed one beyond the bound is invalid_level, like an
+    // out-of-range sensitivity.
+    if (cmd.action == CommandAction::LED_OFFSET) {
+        const bool negative = (*p == '-');
+        if (negative || *p == '+') p++;
+        
+        uint32_t magnitude = 0;
+        const char* digits = p;
+        while (*p >= '0' && *p <= '9') {
+            magnitude = magnitude * 10 + (uint32_t)(*p - '0');
+            if (magnitude > 255) magnitude = 255;  // saturate instead of wrapping into range
+            p++;
+        }
+        if (p == digits || findTokenEnd(p) != p) {
+            m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
+            return false;
+        }
+        if (magnitude > (uint32_t)LED_OFFSET_MAX) {
+            m_eventQueue.queueError("invalid_level", COMMAND_ID_NONE);
+            return false;
+        }
+        
+        cmd.ledOffset = negative ? (int8_t)(-(int8_t)magnitude) : (int8_t)magnitude;
+        p = skipWhitespace(p);
+    }
+    
     // Parse optional command ID (#number)
     if (*p == '#') {
         p++;
@@ -313,6 +341,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "HOLD_GAUGE", len)) return CommandAction::HOLD_GAUGE;
+    if (strcasecmpN(str, "LED_OFFSET", len)) return CommandAction::LED_OFFSET;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
     if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
     if (strcasecmpN(str, "EXPECT_ANY", len)) return CommandAction::EXPECT_ANY;
@@ -351,6 +380,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::EXPAND_STEP: return "EXPAND_STEP";
         case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
         case CommandAction::HOLD_GAUGE: return "HOLD_GAUGE";
+        case CommandAction::LED_OFFSET: return "LED_OFFSET";
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
         case CommandAction::EXPECT_ANY: return "EXPECT_ANY";
@@ -389,6 +419,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::EXPAND_STEP:
         case CommandAction::CONTRACT_STEP:
         case CommandAction::HOLD_GAUGE:
+        case CommandAction::LED_OFFSET:
         case CommandAction::EXPECT:
         case CommandAction::EXPECT_RELEASE:
         case CommandAction::RECALIBRATE:
@@ -505,6 +536,16 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
             } else {
                 m_eventQueue.queueError("command_failed", cmdId);
+            }
+            break;
+            
+        case CommandAction::LED_OFFSET:
+            // The range was checked while parsing; what can still fail here is
+            // an offset that would push the block's center off its strip.
+            if (m_ledController.setLedOffset(cmd.positionIndex, cmd.ledOffset)) {
+                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+            } else {
+                m_eventQueue.queueError("invalid_level", cmdId);
             }
             break;
             
@@ -702,7 +743,9 @@ void CommandController::sendTrack(uint32_t cmdId) {
     m_eventQueue.writeLine(line);
     
     for (uint8_t i = 0; i < profile.holdCount; i++) {
-        if (buildTrackHoldLine(line, sizeof(line), profile, i) > 0) {
+        // With this board's LED_OFFSET applied: the snake has to run where
+        // the blocks really are.
+        if (buildTrackHoldLine(line, sizeof(line), profile, i, m_ledController.ledOffset(i)) > 0) {
             m_eventQueue.writeLine(line);
         }
     }
