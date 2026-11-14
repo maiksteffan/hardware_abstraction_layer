@@ -697,7 +697,6 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
-| 1.5.0 | Automated release; see Git history and GitHub release notes for changes. |
 | 1.5.0 | Sensitivity can be read back: new `GET_SENSITIVITY <pos>` answers `SENSITIVITY <pos> <0-7>` with the level the position's CAP1188 runs at (bits 6:4 of its sensitivity register), `ERR sensor_inactive` for a sensor that failed init or does not answer. The Pi already spoke the command; the firmware answered `ERR unknown_action` until now. `INFO` gains `features=sensitivity`. Every existing command is unchanged |
 | 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |
 | 1.3.19 | Automated release; see Git history and GitHub release notes for changes. |
