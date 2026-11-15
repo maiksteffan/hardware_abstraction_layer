@@ -287,6 +287,17 @@ bool EventQueue::queueTouchState(const char* position, const char* state, uint32
     return enqueue(event, MUTEX_TIMEOUT_TOUCH_QUEUE_MS);
 }
 
+bool EventQueue::queueSensorDiag(const char* position, const char* registers, uint32_t commandId) {
+    Event event = {};
+    event.type = EventType::SENSOR_DIAG;
+    copyPosition(event.position, position);
+    event.commandId = commandId;
+    snprintf(event.extra, sizeof(event.extra), "%s", registers);
+    event.valid = true;
+    // Sent from the polling core like TOUCH_STATE: never wait for the queue.
+    return enqueue(event, MUTEX_TIMEOUT_TOUCH_QUEUE_MS);
+}
+
 // ============================================================================
 // Synchronous output
 // ============================================================================
@@ -422,6 +433,10 @@ void EventQueue::sendEvent(const Event& event) {
 
         case EventType::TOUCH_STATE:
             length = snprintf(buffer, sizeof(buffer), "TOUCH_STATE %s %s", event.position, event.extra);
+            break;
+
+        case EventType::SENSOR_DIAG:
+            length = snprintf(buffer, sizeof(buffer), "SENSOR_DIAG %s %s", event.position, event.extra);
             break;
     }
     

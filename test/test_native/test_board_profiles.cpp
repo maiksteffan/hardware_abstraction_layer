@@ -262,6 +262,15 @@ void test_info_announces_that_sensitivity_can_be_read() {
     TEST_ASSERT_NOT_NULL(strstr(infoValue(line, "features"), "sensitivity"));
 }
 
+void test_info_announces_the_sensor_diagnosis() {
+    // Same reason: firmware without SENSOR_DIAG answers an id-less ERR.
+    char line[EVENT_MESSAGE_BUFFER_SIZE];
+    buildBoardInfoLine(line, sizeof(line), false);
+    TEST_ASSERT_NOT_NULL(strstr(infoValue(line, "features"), "sensordiag"));
+    buildBoardInfoLine(line, sizeof(line), true);
+    TEST_ASSERT_NOT_NULL(strstr(infoValue(line, "features"), "sensordiag"));
+}
+
 void test_the_line_fits_the_event_buffer() {
     selectBoardProfile("nope");  // longest variant: adds requested= and mismatch=
     char buffer[EVENT_MESSAGE_BUFFER_SIZE];
@@ -321,6 +330,7 @@ int main() {
     RUN_TEST(test_the_resolved_line_reports_the_active_profile_and_its_hold_count);
     RUN_TEST(test_the_resolved_line_reports_a_mismatch);
     RUN_TEST(test_info_announces_that_sensitivity_can_be_read);
+    RUN_TEST(test_info_announces_the_sensor_diagnosis);
     RUN_TEST(test_the_line_fits_the_event_buffer);
     RUN_TEST(test_a_short_buffer_truncates_instead_of_overflowing);
     RUN_TEST(test_a_zero_length_buffer_writes_nothing);

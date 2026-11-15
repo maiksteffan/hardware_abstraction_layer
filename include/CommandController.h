@@ -39,6 +39,8 @@
  *   RECALIBRATE_ALL [#id]         - Recalibrate all sensors
  *   VALUE <pos> [#id]             - Get current sensor delta value
  *   TOUCH_STATE <pos> [#id]       - Read raw/debounced/consumed/expectation state without recalibration
+ *   SENSOR_DIAG <pos> [#id]       - Read the CAP1188 registers behind the position (noise flag,
+ *                                   base count, calibration, configuration); changes nothing
  *   SET_SENSITIVITY <pos> <lvl>   - Set sensitivity (0=most, 7=least)
  *   GET_SENSITIVITY <pos> [#id]   - Read the sensitivity the position's chip runs at
  *   CLEAN_QUEUE [#id]             - Clear all pending touch expectations
@@ -93,6 +95,7 @@ enum class CommandAction : uint8_t {
     SET_SENSITIVITY,
     GET_SENSITIVITY,
     TOUCH_STATE,
+    SENSOR_DIAG,
     SCAN,
     SEQUENCE_COMPLETED,
     DEFEAT_ANIMATION,

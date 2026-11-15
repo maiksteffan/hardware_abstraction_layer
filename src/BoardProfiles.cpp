@@ -392,8 +392,9 @@ size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection) {
     // Optional protocol extensions, comma-separated. The Pi only uses a
     // command family when its feature is listed here, so it can talk to older
     // firmware without probing. snake = TRACK / SNAKE / SNAKE_OFF,
-    // holdgauge = HOLD_GAUGE, ledoffset = LED_OFFSET, sensitivity = GET_SENSITIVITY.
-    length = appendTo(buffer, size, length, " features=snake,holdgauge,ledoffset,sensitivity");
+    // holdgauge = HOLD_GAUGE, ledoffset = LED_OFFSET, sensitivity = GET_SENSITIVITY,
+    // sensordiag = SENSOR_DIAG.
+    length = appendTo(buffer, size, length, " features=snake,holdgauge,ledoffset,sensitivity,sensordiag");
 
     if (withSelection) {
         const BoardProfile& profile = activeBoardProfile();

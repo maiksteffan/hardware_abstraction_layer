@@ -64,6 +64,11 @@ TouchController::TouchController()
     m_pendingAnyInput = 0;
     m_touchStateRequest = {false, false, COMMAND_ID_NONE, 0};
     m_touchStateInput = 0;
+    m_sensorDiagRequest = {false, false, COMMAND_ID_NONE, 0};
+    m_sensorDiagInput = 0;
+    m_sensorDiag = {};
+    m_sensorDiagRevision = 0;
+    m_sensorDiagRead = false;
 }
 
 // ============================================================================
@@ -143,6 +148,7 @@ void TouchController::tick() {
     processPendingAnyTouch();
     processHandsOffDetection();
     processTouchStateRequest();
+    processSensorDiagRequest();
 }
 
 bool TouchController::recalibrate(uint8_t inputIndex) {
@@ -912,5 +918,123 @@ void TouchController::processTouchStateRequest() {
     if (!m_eventQueue->queueTouchState(position, state, request.commandId)) return;
     portENTER_CRITICAL(&m_expectationMux);
     if (m_touchStateRequest.revision == request.revision) m_touchStateRequest.active = false;
+    portEXIT_CRITICAL(&m_expectationMux);
+}
+
+// ============================================================================
+// SENSOR_DIAG (chip registers of one hold)
+// ============================================================================
+
+void TouchController::requestSensorDiag(uint8_t inputIndex, uint32_t commandId) {
+    if (inputIndex >= activeBoardProfile().holdCount) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    m_sensorDiagInput = inputIndex;
+    m_sensorDiagRequest.commandId = commandId;
+    m_sensorDiagRequest.revision++;
+    m_sensorDiagRequest.active = true;
+    portEXIT_CRITICAL(&m_expectationMux);
+}
+
+void TouchController::readSensorDiag(uint8_t inputIndex, SensorDiag& diag) {
+    const BoardProfile& profile = activeBoardProfile();
+    diag = {};
+    if (inputIndex >= profile.holdCount) return;
+    uint8_t s = profile.inputMappings[inputIndex].sensorIndex;
+    uint8_t ch = profile.inputMappings[inputIndex].channel;
+    if (s >= profile.sensorCount || ch >= TOUCH_CHANNELS_PER_SENSOR) return;
+
+    uint8_t address = profile.sensorAddresses[s];
+    diag.address = address;
+    diag.channel = ch;
+    if (!m_sensors[s].active) return;
+
+    // What changes from one sensing cycle to the next comes first, so the
+    // status, noise flag and delta of one reply belong together.
+    uint8_t delta = 0;
+    uint8_t calibrationHigh = 0;
+    uint8_t calibrationLow = 0;
+    bool answered =
+        readRegister(address, CAP1188_REG_SENSOR_INPUT_STATUS, diag.inputStatus) &&
+        readRegister(address, CAP1188_REG_NOISE_FLAG_STATUS, diag.noiseFlags) &&
+        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_INPUT_DELTA_1 + ch), delta) &&
+        readRegister(address, CAP1188_REG_GENERAL_STATUS, diag.generalStatus) &&
+        readRegister(address, CAP1188_REG_MAIN_CONTROL, diag.mainControl) &&
+        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_BASE_COUNT_1 + ch), diag.baseCount) &&
+        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_CALIBRATION_1 + ch), calibrationHigh) &&
+        readRegister(address,
+                     ch < 4 ? CAP1188_REG_CALIBRATION_LSB_1 : CAP1188_REG_CALIBRATION_LSB_2,
+                     calibrationLow) &&
+        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_THRESHOLD_1 + ch), diag.threshold) &&
+        readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, diag.sensitivity) &&
+        readRegister(address, CAP1188_REG_CONFIG1, diag.config1) &&
+        readRegister(address, CAP1188_REG_CONFIG2, diag.config2) &&
+        readRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, diag.inputEnable) &&
+        readRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, diag.multiTouch) &&
+        readRegister(address, CAP1188_REG_RECALIBRATION_CONFIG, diag.recalConfig) &&
+        readRegister(address, CAP1188_REG_CALIBRATION_ACTIVE, diag.calibrationActive);
+    if (!answered) return;
+
+    diag.delta = static_cast<int8_t>(delta);
+    diag.calibration = (uint16_t)(((uint16_t)calibrationHigh << 2) |
+                                  ((calibrationLow >> ((ch % 4) * 2)) & 0x03));
+    diag.valid = true;
+}
+
+// Bit fields as two hex digits, quantities (delta, base, cal, thr) in decimal.
+// The longest reply is 143 characters and has to fit Event::extra.
+static void formatSensorDiag(const SensorDiag& diag, char* buffer, size_t size) {
+    if (!diag.valid) {
+        snprintf(buffer, size, "valid=0 chip=%02X cs=%u",
+                 static_cast<unsigned>(diag.address),
+                 static_cast<unsigned>(diag.channel + 1));
+        return;
+    }
+    snprintf(buffer, size,
+             "valid=1 chip=%02X cs=%u main=%02X gen=%02X stat=%02X noise=%02X"
+             " delta=%d base=%u cal=%u thr=%u"
+             " sens=%02X cfg=%02X cfg2=%02X en=%02X mt=%02X recal=%02X calact=%02X",
+             static_cast<unsigned>(diag.address),
+             static_cast<unsigned>(diag.channel + 1),
+             static_cast<unsigned>(diag.mainControl),
+             static_cast<unsigned>(diag.generalStatus),
+             static_cast<unsigned>(diag.inputStatus),
+             static_cast<unsigned>(diag.noiseFlags),
+             static_cast<int>(diag.delta),
+             static_cast<unsigned>(diag.baseCount),
+             static_cast<unsigned>(diag.calibration),
+             static_cast<unsigned>(diag.threshold),
+             static_cast<unsigned>(diag.sensitivity),
+             static_cast<unsigned>(diag.config1),
+             static_cast<unsigned>(diag.config2),
+             static_cast<unsigned>(diag.inputEnable),
+             static_cast<unsigned>(diag.multiTouch),
+             static_cast<unsigned>(diag.recalConfig),
+             static_cast<unsigned>(diag.calibrationActive));
+}
+
+void TouchController::processSensorDiagRequest() {
+    if (!m_eventQueue) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    PointExpectation request = m_sensorDiagRequest;
+    uint8_t inputIndex = m_sensorDiagInput;
+    portEXIT_CRITICAL(&m_expectationMux);
+    if (!request.active) return;
+
+    // Read once per request. Sixteen register reads take longer than one poll
+    // interval, so a reply the event queue refuses is offered again from this
+    // copy instead of stalling every following poll with the same reads.
+    if (!m_sensorDiagRead || m_sensorDiagRevision != request.revision) {
+        readSensorDiag(inputIndex, m_sensorDiag);
+        m_sensorDiagRevision = request.revision;
+        m_sensorDiagRead = true;
+    }
+
+    char position[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(inputIndex, position);
+    char line[sizeof(Event::extra)];
+    formatSensorDiag(m_sensorDiag, line, sizeof(line));
+    if (!m_eventQueue->queueSensorDiag(position, line, request.commandId)) return;
+    portENTER_CRITICAL(&m_expectationMux);
+    if (m_sensorDiagRequest.revision == request.revision) m_sensorDiagRequest.active = false;
     portEXIT_CRITICAL(&m_expectationMux);
 }

@@ -32,6 +32,7 @@ void test_actual_touch_enqueue_never_waits_when_requested_nonblocking() {
     TEST_ASSERT_FALSE(queue.queueHandsOn(COMMAND_ID_NONE, MUTEX_TIMEOUT_TOUCH_QUEUE_MS));
     TEST_ASSERT_FALSE(queue.queueHandsOff(COMMAND_ID_NONE, MUTEX_TIMEOUT_TOUCH_QUEUE_MS));
     TEST_ASSERT_FALSE(queue.queueTouchState("H01", "raw=1", 3));
+    TEST_ASSERT_FALSE(queue.queueSensorDiag("H01", "valid=1", 4));
     TEST_ASSERT_EQUAL_UINT32(0, g_waitedMs);
     TEST_ASSERT_TRUE(queue.isEmpty());
 }
@@ -57,6 +58,26 @@ void test_ack_touch_and_diagnostic_serialize_in_order_with_ids() {
         "ACK EXPECT H01 #42\nTOUCHED H01 #42\n"
         "ACK TOUCH_STATE H01 #43\nTOUCH_STATE H01 active=1 valid=1 raw=1 #43\n",
         Serial.output);
+}
+
+void test_sensor_diag_reply_follows_its_ack_and_keeps_the_longest_line_whole() {
+    // The longest reply the firmware builds: every field at its widest.
+    const char* registers =
+        "valid=1 chip=2C cs=8 main=FF gen=FF stat=FF noise=FF"
+        " delta=-128 base=255 cal=1023 thr=127"
+        " sens=FF cfg=FF cfg2=FF en=FF mt=FF recal=FF calact=FF";
+    TEST_ASSERT_LESS_THAN(sizeof(Event::extra), strlen(registers));
+
+    EventQueue queue;
+    queue.begin();
+    TEST_ASSERT_TRUE(queue.queueAck("SENSOR_DIAG", "H32", 77));
+    TEST_ASSERT_TRUE(queue.queueSensorDiag("H32", registers, 77));
+    queue.flush(QUEUE_SIZE_EVENTS);
+
+    char expected[EVENT_MESSAGE_BUFFER_SIZE];
+    snprintf(expected, sizeof(expected),
+             "ACK SENSOR_DIAG H32 #77\nSENSOR_DIAG H32 %s #77\n", registers);
+    TEST_ASSERT_EQUAL_STRING(expected, Serial.output);
 }
 
 void test_sensitivity_reply_is_the_line_the_pi_parses() {
@@ -85,6 +106,7 @@ int main() {
     RUN_TEST(test_actual_touch_enqueue_never_waits_when_requested_nonblocking);
     RUN_TEST(test_command_replies_keep_the_existing_queue_timeout);
     RUN_TEST(test_ack_touch_and_diagnostic_serialize_in_order_with_ids);
+    RUN_TEST(test_sensor_diag_reply_follows_its_ack_and_keeps_the_longest_line_whole);
     RUN_TEST(test_sensitivity_reply_is_the_line_the_pi_parses);
     RUN_TEST(test_queue_full_can_be_retried_without_changing_event_grammar);
     return UNITY_END();
