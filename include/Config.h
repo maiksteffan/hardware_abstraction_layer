@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.6.0"
+#define FIRMWARE_VERSION "1.6.1"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -337,6 +337,9 @@ constexpr uint8_t CAP1188_REG_REVISION = 0xFF;
 
 // CAP1188 default values
 constexpr uint8_t CAP1188_CS1_BIT_MASK = 0x01;
+// MAIN_CONTROL as the firmware runs every chip: gain 1x, scanning (neither
+// standby nor deep sleep), INT clear. Written as a whole to clear INT.
+constexpr uint8_t CAP1188_MAIN_CONTROL_ACTIVE = 0x00;
 // Sensitivity level written to every chip at init (bits 6:4 of reg 0x1F).
 // 0 = most sensitive (128x) ... 7 = least sensitive (1x). Chip default is 2.
 // Can still be changed at runtime per chip via SET_SENSITIVITY.

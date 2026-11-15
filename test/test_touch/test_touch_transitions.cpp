@@ -750,6 +750,95 @@ void test_occupancy_delivery_retries_without_blocking_poll() {
     expectEvent(1, EventType::HANDS_OFF, COMMAND_ID_NONE);
 }
 
+// ---- Two cores on one bus --------------------------------------------------
+// The command core reads and writes chip registers too (VALUE, sensitivity,
+// recalibration), and the Wire lock covers one transaction. On hardware its
+// transaction can therefore land between any two of the polling core's - and
+// the other way round. The shim gives the other core that turn (onBusFree).
+
+static uint8_t g_otherCoreChip;
+static uint8_t g_otherCoreRegister;
+
+// What a register access of the other core leaves behind: the chip pointing
+// at that core's register.
+static void otherCoreAccess(TwoWire& wire) {
+    wire.pointer[g_otherCoreChip] = g_otherCoreRegister;
+}
+
+static void otherCoreKeepsAccessing(uint8_t input, uint8_t reg) {
+    const BoardProfile& profile = activeBoardProfile();
+    g_otherCoreChip = profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+    g_otherCoreRegister = reg;
+    Wire.onBusFree = otherCoreAccess;
+}
+
+void test_a_value_read_on_the_command_core_cannot_redirect_the_poll() {
+    // VALUE for a held hold leaves its chip pointing at the delta register.
+    // A delta of 100 (0x64) taken for the status byte reads as inputs 3, 6
+    // and 7 touched and every other one let go - so a hold on input 4 or 5.
+    uint8_t input = holdOnChannel(3, 4);
+    char position[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(input, position);
+    otherCoreKeepsAccessing(
+        input, CAP1188_REG_SENSOR_INPUT_DELTA_1 + activeBoardProfile().inputMappings[input].channel);
+
+    g_touch.setExpectDown(input, 400);
+    g_touch.setExpectUp(input, 401);
+    contact(input, true);
+    advance(TOUCH_DEBOUNCE_RELEASE_MS + 100);
+
+    expectEvent(0, EventType::TOUCHED, 400, position);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);  // held throughout: no release
+    for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
+        TEST_ASSERT_EQUAL(i == input, g_touch.isTouched(i));
+    }
+    // Nor was a delta taken for MAIN_CONTROL and written back.
+    TEST_ASSERT_EQUAL_HEX8(CAP1188_MAIN_CONTROL_ACTIVE, chipRegisters(input)[CAP1188_REG_MAIN_CONTROL]);
+}
+
+void test_a_poll_cannot_redirect_a_read_on_the_command_core() {
+    // The other way round: the poll's status read lands between the pointer
+    // write and the read of VALUE and GET_SENSITIVITY.
+    otherCoreKeepsAccessing(0, CAP1188_REG_SENSOR_INPUT_STATUS);
+    contact(0, true);
+
+    int8_t value = 0;
+    TEST_ASSERT_TRUE(g_touch.readSensorValue(0, value));
+    TEST_ASSERT_EQUAL_INT8(100, value);
+    uint8_t level = 0xFF;
+    TEST_ASSERT_TRUE(g_touch.readSensitivity(0, level));
+    TEST_ASSERT_EQUAL_UINT8(CAP1188_DEFAULT_SENSITIVITY, level);
+}
+
+void test_setting_the_sensitivity_under_a_poll_keeps_the_registers_other_bits() {
+    // SET_SENSITIVITY reads the register and writes it back with a new level.
+    // The chip's base shift lives in the low nibble of the same register.
+    otherCoreKeepsAccessing(0, CAP1188_REG_SENSOR_INPUT_STATUS);
+    chipRegisters(0)[CAP1188_REG_SENSITIVITY_CONTROL] = 0x2F;
+
+    TEST_ASSERT_TRUE(g_touch.setSensitivity(0, 5));
+
+    TEST_ASSERT_EQUAL_HEX8(0x5F, chipRegisters(0)[CAP1188_REG_SENSITIVITY_CONTROL]);
+}
+
+void test_clearing_the_interrupt_writes_the_firmwares_value_not_what_it_read() {
+    // INT set by the touch, plus gain bits the firmware never sets - what a
+    // misread byte written back used to leave behind.
+    chipRegisters(0)[CAP1188_REG_MAIN_CONTROL] = 0xC1;
+    contact(0, true);
+    advance(10);
+
+    TEST_ASSERT_EQUAL_HEX8(CAP1188_MAIN_CONTROL_ACTIVE, chipRegisters(0)[CAP1188_REG_MAIN_CONTROL]);
+}
+
+void test_a_chip_nobody_touches_is_only_read() {
+    // No touch, no interrupt to clear: the poll stays one read per chip.
+    chipRegisters(0)[CAP1188_REG_MAIN_CONTROL] = 0x01;
+    advance(50);
+
+    TEST_ASSERT_EQUAL_HEX8(0x01, chipRegisters(0)[CAP1188_REG_MAIN_CONTROL]);
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_next_hold_grabbed_before_expect_any_is_not_lost);
@@ -794,6 +883,11 @@ int main() {
     RUN_TEST(test_newer_sensor_diag_request_replaces_an_undelivered_one);
     RUN_TEST(test_sensor_diag_of_a_chip_that_stops_answering_says_so);
     RUN_TEST(test_occupancy_delivery_retries_without_blocking_poll);
+    RUN_TEST(test_a_value_read_on_the_command_core_cannot_redirect_the_poll);
+    RUN_TEST(test_a_poll_cannot_redirect_a_read_on_the_command_core);
+    RUN_TEST(test_setting_the_sensitivity_under_a_poll_keeps_the_registers_other_bits);
+    RUN_TEST(test_clearing_the_interrupt_writes_the_firmwares_value_not_what_it_read);
+    RUN_TEST(test_a_chip_nobody_touches_is_only_read);
     return UNITY_END();
 }
 

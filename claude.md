@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.6.0` |
+| `FIRMWARE_VERSION` | `1.6.1` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -90,8 +90,29 @@ Sequenzboard repo.
 
 | Core | Runs | Owns |
 |---|---|---|
-| **Core 0** | `touchPollingTask` → `TouchController::tick()` every 5 ms (`vTaskDelayUntil`) | ALL I²C traffic |
-| **Core 1** | Arduino `loop()` | Serial RX/TX, command execution, ALL NeoPixel writes |
+| **Core 0** | `touchPollingTask` → `TouchController::tick()` every 5 ms (`vTaskDelayUntil`) | The sensor poll and what is read on its behalf (`TOUCH_STATE`, `SENSOR_DIAG`) |
+| **Core 1** | Arduino `loop()` | Serial RX/TX, command execution, ALL NeoPixel writes; the register access of `VALUE`, `GET_SENSITIVITY`, `SET_SENSITIVITY`, `RECALIBRATE`, `RECALIBRATE_ALL` |
+
+**Both cores talk to the sensor chips.** The Wire lock covers one bus
+transaction, not a sequence of them, so a transaction of one core can land
+between any two of the other's. Two rules keep that harmless (since 1.6.1):
+
+- **A register read is one transaction.** `TouchController::readRegister()`
+  sends the register pointer without a stop and reads with a repeated start;
+  the ESP32 Wire library keeps the bus for that pair. With a stop in between,
+  the other core could repoint the same chip before the read - a delta was
+  then taken for the status byte, or `VALUE` answered with the status byte.
+  Never read a register any other way.
+- **Nothing read is written back where a constant will do.** Clearing INT
+  writes `CAP1188_MAIN_CONTROL_ACTIVE` to `MAIN_CONTROL` instead of
+  read-modify-write: a misread byte written back there switched a chip to
+  standby, deep sleep or another gain. `SET_SENSITIVITY` still reads its
+  register first (the base shift lives in the same byte), which is safe now
+  that the read cannot return another register.
+
+A read followed by a write of the same core is still two transactions. That
+is fine as long as the other core never writes the same register - the poll
+writes `MAIN_CONTROL` only, the command core never does.
 
 Outgoing cross-core events use the **`EventQueue`** (FreeRTOS-mutex-protected,
 64 slots). Command-side expectation registration shares a short
@@ -165,7 +186,8 @@ Runs on Core 0 every 5 ms:
 1. Read each active CAP1188's status register **once** per cycle (cached in
    `PhysicalSensor::lastStatus`) — never per-input reads.
 2. Update the profile's logical inputs via `inputMappings`.
-3. Clear the INT bit on chips that reported a touch (keeps latching alive).
+3. Clear the INT bit on chips that reported a touch (keeps latching alive):
+   one write of `CAP1188_MAIN_CONTROL_ACTIVE` per such chip, no read (see 2.2).
 4. Debounce → expectation matching → EXPECT_ANY qualification → hands-off.
 
 **Debounce (asymmetric):** press is instant (`TOUCH_DEBOUNCE_PRESS_MS` = 0);
@@ -432,7 +454,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.6.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.6.1 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -654,7 +676,10 @@ app) as the release asset.
 
 ## 6.2 Concurrency
 
-- Core 0 = touch/I²C only; Core 1 = serial/LED only. Outgoing events cross via
+- Core 0 = touch polling; Core 1 = serial/LED and the register access of the
+  sensor commands. Both use the I²C bus: read registers only through
+  `readRegister()` (one transaction) and do not read-modify-write a register
+  the other core writes (see 2.2). Outgoing events cross via
   `EventQueue`; expectation requests share `m_expectationMux`. Never hold that
   critical section across I²C or EventQueue calls. Never call `LedController`
   or `Serial` from the touch task.
@@ -724,6 +749,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.6.1 | Two cores on one I²C bus no longer read each other's registers. A register read was a pointer write with a stop, then a read; the Wire lock is held per transaction, so `VALUE`, `GET_SENSITIVITY`, `SET_SENSITIVITY` or `RECALIBRATE` on the command core could repoint a chip between the two halves of a poll read, and the poll between the halves of theirs. The poll then took a delta for the status byte of one sample (enough for a false touch, since a press counts at once) or for `MAIN_CONTROL`, which it wrote back with INT cleared - standby, deep sleep or another gain, holds dead until a recalibration or reboot; `VALUE` could answer with the status byte and `SET_SENSITIVITY` wipe the base shift. `readRegister()` now sends pointer and read as one transaction (repeated start), and INT is cleared by writing `CAP1188_MAIN_CONTROL_ACTIVE` instead of read-modify-write, which also saves one read per touched chip and poll and puts a chip with a changed gain right again. Only reachable while the Pi sends one of those commands, i.e. from the calibration screen and the sensitivity replay after boot, not during a game. Protocol unchanged. Found by reading the code; not observed on a wall, and the repeated-start read is untested on hardware - check `SCAN`, a touch and `SENSOR_DIAG` after flashing |
 | 1.6.0 | Diagnosis for a hold that stops registering touches until it is recalibrated: new `SENSOR_DIAG <pos>` replies `ACK`, then one line with the CAP1188 registers behind the position (noise flags, status, delta, base count, 10-bit calibration value, threshold, main control, general status, input enable, configuration 1/2, recalibration configuration, calibration-activate, multiple-touch configuration). Read on the polling core, once per request, without writing anything to the chip; `ERR sensor_inactive` for a sensor that failed init, `valid=0` for a chip that stops answering. The firmware interprets nothing - the Pi names what the values mean. `INFO` gains `features=sensordiag`. Every existing command is unchanged; the cause of the reported dead holds is not fixed by this release, only made visible |
 | 1.5.0 | Sensitivity can be read back: new `GET_SENSITIVITY <pos>` answers `SENSITIVITY <pos> <0-7>` with the level the position's CAP1188 runs at (bits 6:4 of its sensitivity register), `ERR sensor_inactive` for a sensor that failed init or does not answer. The Pi already spoke the command; the firmware answered `ERR unknown_action` until now. `INFO` gains `features=sensitivity`. Every existing command is unchanged |
 | 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |

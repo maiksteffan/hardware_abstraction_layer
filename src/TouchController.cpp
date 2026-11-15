@@ -523,9 +523,15 @@ bool TouchController::diagInitSensor(uint8_t sensorIndex, char* outDiag, size_t 
 }
 
 bool TouchController::readRegister(uint8_t address, uint8_t reg, uint8_t& value) {
+    // Register pointer and read as ONE bus transaction (repeated start, no
+    // stop in between). The polling core and the command core both talk to
+    // the chips, and the Wire lock is held per transaction: with a stop after
+    // the pointer write the other core could repoint the same chip before the
+    // read, which then returned that core's register - a delta taken for the
+    // status byte, or for MAIN_CONTROL and written back.
     Wire.beginTransmission(address);
     Wire.write(reg);
-    if (Wire.endTransmission() != 0) return false;
+    if (Wire.endTransmission(false) != 0) return false;
 
     if (Wire.requestFrom(address, (uint8_t)1) == 1) {
         value = Wire.read();
@@ -605,16 +611,16 @@ void TouchController::pollSensors() {
     }
 
     // Step 3: clear the INT bit on every sensor that reported any active channel,
-    // so that future touches are detected.
+    // so that future touches are detected. The register is written with the
+    // one value the firmware runs the chip at, never read and written back: a
+    // misread byte must not be able to switch the chip to standby, deep sleep
+    // or another gain - and a chip that got there anyway is put right again.
     for (uint8_t s = 0; s < profile.sensorCount; s++) {
         if (!m_sensors[s].active || !m_sensors[s].statusValid) continue;
         if (m_sensors[s].lastStatus == 0) continue;
 
-        uint8_t mc;
-        if (readRegister(profile.sensorAddresses[s], CAP1188_REG_MAIN_CONTROL, mc)) {
-            writeRegister(profile.sensorAddresses[s],
-                          CAP1188_REG_MAIN_CONTROL, (uint8_t)(mc & ~0x01));
-        }
+        writeRegister(profile.sensorAddresses[s],
+                      CAP1188_REG_MAIN_CONTROL, CAP1188_MAIN_CONTROL_ACTIVE);
     }
 }
 
