@@ -258,6 +258,54 @@ void test_v2_eighth_sensor_channel_is_enabled_and_detected() {
     expectEvent(0, EventType::TOUCHED, 110, "H32");
 }
 
+void test_sensitivity_reads_back_what_the_chip_runs_at() {
+    uint8_t level = 0xFF;
+    TEST_ASSERT_TRUE(g_touch.readSensitivity(0, level));
+    TEST_ASSERT_EQUAL_UINT8(CAP1188_DEFAULT_SENSITIVITY, level);
+
+    TEST_ASSERT_TRUE(g_touch.setSensitivity(0, 5));
+    TEST_ASSERT_TRUE(g_touch.readSensitivity(0, level));
+    TEST_ASSERT_EQUAL_UINT8(5, level);
+}
+
+void test_sensitivity_is_shared_by_the_holds_of_one_chip() {
+    // The level is one register per CAP1188: a hold reports what a neighbour
+    // on its chip set, and a hold on another chip is left alone.
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t firstSensor = profile.inputMappings[0].sensorIndex;
+    int sameChip = -1;
+    int otherChip = -1;
+    for (uint8_t i = 1; i < profile.holdCount; i++) {
+        bool shared = profile.inputMappings[i].sensorIndex == firstSensor;
+        if (shared && sameChip < 0) sameChip = i;
+        if (!shared && otherChip < 0) otherChip = i;
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL(0, sameChip);
+    TEST_ASSERT_GREATER_OR_EQUAL(0, otherChip);
+
+    TEST_ASSERT_TRUE(g_touch.setSensitivity(0, 6));
+
+    uint8_t level = 0xFF;
+    TEST_ASSERT_TRUE(g_touch.readSensitivity((uint8_t)sameChip, level));
+    TEST_ASSERT_EQUAL_UINT8(6, level);
+    TEST_ASSERT_TRUE(g_touch.readSensitivity((uint8_t)otherChip, level));
+    TEST_ASSERT_EQUAL_UINT8(CAP1188_DEFAULT_SENSITIVITY, level);
+}
+
+void test_sensitivity_of_a_dead_sensor_is_not_reported() {
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t sensor = profile.inputMappings[0].sensorIndex;
+    Wire.registers[profile.sensorAddresses[sensor]][CAP1188_REG_PRODUCT_ID] = 0x00;
+    g_touch = TouchController{};
+    g_touch.setEventQueue(&g_queue);
+    g_touch.begin();
+
+    uint8_t level = 0xFF;
+    TEST_ASSERT_FALSE(g_touch.readSensitivity(0, level));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, level);
+    TEST_ASSERT_FALSE(g_touch.readSensitivity(profile.holdCount, level));
+}
+
 void test_handoff_preserves_occupancy_until_last_hold_releases() {
     contact(0, true);
     advance(5);
@@ -586,6 +634,9 @@ int main() {
     RUN_TEST(test_clean_queue_does_not_replay_an_already_held_candidate);
     RUN_TEST(test_failed_status_reads_cannot_confirm_a_release);
     RUN_TEST(test_v2_eighth_sensor_channel_is_enabled_and_detected);
+    RUN_TEST(test_sensitivity_reads_back_what_the_chip_runs_at);
+    RUN_TEST(test_sensitivity_is_shared_by_the_holds_of_one_chip);
+    RUN_TEST(test_sensitivity_of_a_dead_sensor_is_not_reported);
     RUN_TEST(test_handoff_preserves_occupancy_until_last_hold_releases);
     RUN_TEST(test_two_simultaneous_grabs_are_delivered_across_rearming);
     RUN_TEST(test_release_and_next_press_work_across_millis_wrap);

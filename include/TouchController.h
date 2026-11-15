@@ -96,6 +96,10 @@ public:
     // setting it on any input affects every other input mapped to the same
     // physical sensor.
     bool setSensitivity(uint8_t inputIndex, uint8_t level);
+    // The level the input's chip runs at right now (0 = most sensitive, 7 =
+    // least), read back from the chip - so it is also what a neighbour on the
+    // same sensor last set. False when the sensor is inactive or does not answer.
+    bool readSensitivity(uint8_t inputIndex, uint8_t& level);
     
     // Expectations (indexed by input 0..holdCount-1). Point setters publish a
     // request; polling evaluates it within one tick, including already-held /

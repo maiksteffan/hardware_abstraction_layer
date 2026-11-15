@@ -59,6 +59,15 @@ void test_ack_touch_and_diagnostic_serialize_in_order_with_ids() {
         Serial.output);
 }
 
+void test_sensitivity_reply_is_the_line_the_pi_parses() {
+    EventQueue queue;
+    queue.begin();
+    TEST_ASSERT_TRUE(queue.queueSensitivity("H07", 4, 51));
+    TEST_ASSERT_TRUE(queue.queueSensitivity("H08", 0));
+    queue.flush(QUEUE_SIZE_EVENTS);
+    TEST_ASSERT_EQUAL_STRING("SENSITIVITY H07 4 #51\nSENSITIVITY H08 0\n", Serial.output);
+}
+
 void test_queue_full_can_be_retried_without_changing_event_grammar() {
     EventQueue queue;
     queue.begin();
@@ -76,6 +85,7 @@ int main() {
     RUN_TEST(test_actual_touch_enqueue_never_waits_when_requested_nonblocking);
     RUN_TEST(test_command_replies_keep_the_existing_queue_timeout);
     RUN_TEST(test_ack_touch_and_diagnostic_serialize_in_order_with_ids);
+    RUN_TEST(test_sensitivity_reply_is_the_line_the_pi_parses);
     RUN_TEST(test_queue_full_can_be_retried_without_changing_event_grammar);
     return UNITY_END();
 }

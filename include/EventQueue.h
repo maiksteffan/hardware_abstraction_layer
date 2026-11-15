@@ -29,6 +29,7 @@ enum class EventType : uint8_t {
     RECALIBRATED,   // Sensor recalibrated
     INFO,           // Firmware info
     VALUE,          // Sensor value response
+    SENSITIVITY,    // Sensor sensitivity level response
     HANDS_ON,       // Hands-off detection: board went from untouched to touched
     HANDS_OFF,      // Hands-off detection: board went from touched to untouched
     TOUCH_STATE     // On-demand touch pipeline diagnostic snapshot
@@ -83,6 +84,7 @@ public:
     bool queueRecalibrated(const char* position, uint32_t commandId = COMMAND_ID_NONE);
     bool queueInfo(uint32_t commandId = COMMAND_ID_NONE);
     bool queueValue(const char* position, int8_t value, uint32_t commandId = COMMAND_ID_NONE);
+    bool queueSensitivity(const char* position, uint8_t level, uint32_t commandId = COMMAND_ID_NONE);
     bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     bool queueTouchState(const char* position, const char* state, uint32_t commandId);
