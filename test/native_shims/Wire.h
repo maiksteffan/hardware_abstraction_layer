@@ -20,6 +20,11 @@ class TwoWire {
 public:
     uint8_t registers[128][256] = {};
     bool failStatus[128] = {};
+    // A chip that answers no register at all.
+    bool silent[128] = {};
+    // How many more reads of a register fail; FAIL_ALWAYS never runs out.
+    static constexpr uint8_t FAIL_ALWAYS = 0xFF;
+    uint8_t failReads[128][256] = {};
     uint32_t deltaReads = 0;
     // Register each chip's pointer rests on.
     uint8_t pointer[128] = {};
@@ -51,7 +56,12 @@ public:
         uint8_t reg = pointer[address];
         if (reg >= 0x10 && reg <= 0x17) deltaReads++;
         m_value = registers[address][reg];
-        bool answered = !(reg == 0x03 && failStatus[address]);
+        bool answered = !(reg == 0x03 && failStatus[address]) && !silent[address];
+        uint8_t& failing = failReads[address][reg];
+        if (failing) {
+            answered = false;
+            if (failing != FAIL_ALWAYS) failing--;
+        }
         busFree();
         return answered ? 1 : 0;
     }

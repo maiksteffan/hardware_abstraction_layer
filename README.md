@@ -136,7 +136,9 @@ still reads 0 under a hand, the chip itself is blocking the channel. Send
 `SENSOR_DIAG H05 #124` next - still before recalibrating, which erases that
 state. It replies `ACK SENSOR_DIAG H05 #124`, then one
 `SENSOR_DIAG H05 valid=1 chip=.. cs=.. main=.. gen=.. stat=.. noise=.. delta=.. base=.. cal=.. thr=.. sens=.. cfg=.. cfg2=.. en=.. mt=.. recal=.. calact=.. #124`
-line (bit fields in hex, `delta`/`base`/`cal`/`thr` decimal):
+line (bit fields in hex, `delta`/`base`/`cal`/`thr` decimal). A register
+the chip refuses twice is left out and listed by its address at the end, e.g.
+`miss=50,B9`; `valid=0 chip=.. cs=..` alone means the chip answered none:
 
 - bit `cs-1` set in `noise`: the chip flags noise on the channel and holds its delta at 0.
 - `mt=80`: the chip restarted after the firmware configured it (the firmware writes `00`).

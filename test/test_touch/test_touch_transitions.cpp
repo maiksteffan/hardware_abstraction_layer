@@ -722,7 +722,7 @@ void test_newer_sensor_diag_request_replaces_an_undelivered_one() {
 void test_sensor_diag_of_a_chip_that_stops_answering_says_so() {
     const BoardProfile& profile = activeBoardProfile();
     uint8_t address = profile.sensorAddresses[profile.inputMappings[0].sensorIndex];
-    Wire.failStatus[address] = true;
+    Wire.silent[address] = true;
 
     g_touch.requestSensorDiag(0, 406);
     advance(5);
@@ -732,6 +732,66 @@ void test_sensor_diag_of_a_chip_that_stops_answering_says_so() {
              address, profile.inputMappings[0].channel + 1);
     expectEvent(0, EventType::SENSOR_DIAG, 406, "H01");
     TEST_ASSERT_EQUAL_STRING(expected, g_events[0].extra);
+}
+
+void test_sensor_diag_names_a_register_the_chip_refuses_and_keeps_the_rest() {
+    // One chip on a wall answered the delta (VALUE) but not every diagnostic
+    // register: the reply was valid=0 and said nothing about which one.
+    uint8_t input = holdOnChannel(0, 3);
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t channel = profile.inputMappings[input].channel;
+    uint8_t address = profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+    uint8_t* chip = chipRegisters(input);
+    chip[CAP1188_REG_SENSOR_BASE_COUNT_1 + channel] = 200;
+    chip[CAP1188_REG_SENSOR_THRESHOLD_1 + channel] = 0x40;
+    Wire.failReads[address][CAP1188_REG_SENSOR_BASE_COUNT_1 + channel] = TwoWire::FAIL_ALWAYS;
+    Wire.failReads[address][CAP1188_REG_CALIBRATION_LSB_1] = TwoWire::FAIL_ALWAYS;
+
+    g_touch.requestSensorDiag(input, 407);
+    advance(5);
+
+    const char* reply = g_events[0].extra;
+    TEST_ASSERT_EQUAL_STRING_LEN("valid=1 ", reply, 8);
+    TEST_ASSERT_NULL(strstr(reply, " base="));
+    TEST_ASSERT_NULL(strstr(reply, " cal="));   // needs both of its registers
+    TEST_ASSERT_NOT_NULL(strstr(reply, " delta=0 thr=64 "));
+    TEST_ASSERT_NOT_NULL(strstr(reply, " calact=00"));
+    char miss[24];
+    snprintf(miss, sizeof(miss), " miss=%02X,B9", CAP1188_REG_SENSOR_BASE_COUNT_1 + channel);
+    TEST_ASSERT_NOT_NULL(strstr(reply, miss));
+    TEST_ASSERT_EQUAL_STRING(miss, reply + strlen(reply) - strlen(miss));
+}
+
+void test_sensor_diag_reads_a_register_again_before_calling_it_missing() {
+    uint8_t input = holdOnChannel(0, 7);
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t address = profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+    chipRegisters(input)[CAP1188_REG_CONFIG2] = 0x40;
+    Wire.failReads[address][CAP1188_REG_CONFIG2] = SENSOR_DIAG_READ_ATTEMPTS - 1;
+
+    g_touch.requestSensorDiag(input, 408);
+    advance(5);
+
+    TEST_ASSERT_NOT_NULL(strstr(g_events[0].extra, " cfg2=40 "));
+    TEST_ASSERT_NULL(strstr(g_events[0].extra, "miss="));
+}
+
+void test_a_chip_that_answers_one_register_lists_the_fifteen_others() {
+    // The miss list grows as the reply shrinks: it must never be cut off.
+    uint8_t input = holdOnChannel(0, 7);
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t address = profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+    for (uint16_t reg = 0; reg < 256; reg++) {
+        if (reg != CAP1188_REG_MAIN_CONTROL) Wire.failReads[address][reg] = TwoWire::FAIL_ALWAYS;
+    }
+
+    g_touch.requestSensorDiag(input, 409);
+    advance(5);
+
+    const char* reply = g_events[0].extra;
+    TEST_ASSERT_EQUAL_STRING_LEN("valid=1 ", reply, 8);
+    TEST_ASSERT_NOT_NULL(strstr(reply, " main=00 miss=03,0A,"));
+    TEST_ASSERT_EQUAL_STRING(",26", reply + strlen(reply) - 3);  // the last one read
 }
 
 void test_occupancy_delivery_retries_without_blocking_poll() {
@@ -882,6 +942,9 @@ int main() {
     RUN_TEST(test_sensor_diag_retries_delivery_without_reading_the_chip_again);
     RUN_TEST(test_newer_sensor_diag_request_replaces_an_undelivered_one);
     RUN_TEST(test_sensor_diag_of_a_chip_that_stops_answering_says_so);
+    RUN_TEST(test_sensor_diag_names_a_register_the_chip_refuses_and_keeps_the_rest);
+    RUN_TEST(test_sensor_diag_reads_a_register_again_before_calling_it_missing);
+    RUN_TEST(test_a_chip_that_answers_one_register_lists_the_fifteen_others);
     RUN_TEST(test_occupancy_delivery_retries_without_blocking_poll);
     RUN_TEST(test_a_value_read_on_the_command_core_cannot_redirect_the_poll);
     RUN_TEST(test_a_poll_cannot_redirect_a_read_on_the_command_core);

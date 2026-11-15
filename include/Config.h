@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.6.1"
+#define FIRMWARE_VERSION "1.6.2"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -346,6 +346,11 @@ constexpr uint8_t CAP1188_MAIN_CONTROL_ACTIVE = 0x00;
 constexpr uint8_t CAP1188_DEFAULT_SENSITIVITY = 2;
 constexpr uint8_t CAP1188_DEFAULT_THRESHOLD = 0x10;
 constexpr uint8_t CAP1188_DEFAULT_AVERAGING = 0x25;
+
+// SENSOR_DIAG reads each register this often before it counts as missing: a
+// single lost transaction should not cost the whole reply, and a register a
+// chip never answers should show up as itself, not as a silent chip.
+constexpr uint8_t SENSOR_DIAG_READ_ATTEMPTS = 2;
 
 // ============================================================================
 // 11. PROTOCOL CONSTANTS

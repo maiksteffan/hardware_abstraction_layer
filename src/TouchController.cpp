@@ -14,6 +14,9 @@
  */
 
 #include "TouchController.h"
+
+#include <stdarg.h>
+#include <stdio.h>
 #include "CommandController.h"   // for indexToPosition()
 #include "EventQueue.h"
 
@@ -941,6 +944,38 @@ void TouchController::requestSensorDiag(uint8_t inputIndex, uint32_t commandId) 
     portEXIT_CRITICAL(&m_expectationMux);
 }
 
+// Register behind each DiagRegister for a channel (0..7).
+static uint8_t diagRegisterAddress(DiagRegister reg, uint8_t ch) {
+    switch (reg) {
+        case DiagRegister::INPUT_STATUS:       return CAP1188_REG_SENSOR_INPUT_STATUS;
+        case DiagRegister::NOISE_FLAGS:        return CAP1188_REG_NOISE_FLAG_STATUS;
+        case DiagRegister::DELTA:              return (uint8_t)(CAP1188_REG_SENSOR_INPUT_DELTA_1 + ch);
+        case DiagRegister::GENERAL_STATUS:     return CAP1188_REG_GENERAL_STATUS;
+        case DiagRegister::MAIN_CONTROL:       return CAP1188_REG_MAIN_CONTROL;
+        case DiagRegister::BASE_COUNT:         return (uint8_t)(CAP1188_REG_SENSOR_BASE_COUNT_1 + ch);
+        case DiagRegister::CALIBRATION:        return (uint8_t)(CAP1188_REG_SENSOR_CALIBRATION_1 + ch);
+        case DiagRegister::CALIBRATION_LSB:
+            return ch < 4 ? CAP1188_REG_CALIBRATION_LSB_1 : CAP1188_REG_CALIBRATION_LSB_2;
+        case DiagRegister::THRESHOLD:          return (uint8_t)(CAP1188_REG_SENSOR_THRESHOLD_1 + ch);
+        case DiagRegister::SENSITIVITY:        return CAP1188_REG_SENSITIVITY_CONTROL;
+        case DiagRegister::CONFIG1:            return CAP1188_REG_CONFIG1;
+        case DiagRegister::CONFIG2:            return CAP1188_REG_CONFIG2;
+        case DiagRegister::INPUT_ENABLE:       return CAP1188_REG_SENSOR_INPUT_ENABLE;
+        case DiagRegister::MULTI_TOUCH:        return CAP1188_REG_MULTIPLE_TOUCH_CONFIG;
+        case DiagRegister::RECAL_CONFIG:       return CAP1188_REG_RECALIBRATION_CONFIG;
+        case DiagRegister::CALIBRATION_ACTIVE: return CAP1188_REG_CALIBRATION_ACTIVE;
+        case DiagRegister::COUNT:              break;
+    }
+    return 0;
+}
+
+static uint16_t diagBit(DiagRegister reg) {
+    return (uint16_t)(1u << static_cast<uint8_t>(reg));
+}
+
+static constexpr uint8_t DIAG_REGISTER_COUNT = static_cast<uint8_t>(DiagRegister::COUNT);
+static_assert(DIAG_REGISTER_COUNT <= 16, "SensorDiag::missing has one bit per register");
+
 void TouchController::readSensorDiag(uint8_t inputIndex, SensorDiag& diag) {
     const BoardProfile& profile = activeBoardProfile();
     diag = {};
@@ -954,31 +989,33 @@ void TouchController::readSensorDiag(uint8_t inputIndex, SensorDiag& diag) {
     diag.channel = ch;
     if (!m_sensors[s].active) return;
 
-    // What changes from one sensing cycle to the next comes first, so the
-    // status, noise flag and delta of one reply belong together.
     uint8_t delta = 0;
     uint8_t calibrationHigh = 0;
     uint8_t calibrationLow = 0;
-    bool answered =
-        readRegister(address, CAP1188_REG_SENSOR_INPUT_STATUS, diag.inputStatus) &&
-        readRegister(address, CAP1188_REG_NOISE_FLAG_STATUS, diag.noiseFlags) &&
-        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_INPUT_DELTA_1 + ch), delta) &&
-        readRegister(address, CAP1188_REG_GENERAL_STATUS, diag.generalStatus) &&
-        readRegister(address, CAP1188_REG_MAIN_CONTROL, diag.mainControl) &&
-        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_BASE_COUNT_1 + ch), diag.baseCount) &&
-        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_CALIBRATION_1 + ch), calibrationHigh) &&
-        readRegister(address,
-                     ch < 4 ? CAP1188_REG_CALIBRATION_LSB_1 : CAP1188_REG_CALIBRATION_LSB_2,
-                     calibrationLow) &&
-        readRegister(address, (uint8_t)(CAP1188_REG_SENSOR_THRESHOLD_1 + ch), diag.threshold) &&
-        readRegister(address, CAP1188_REG_SENSITIVITY_CONTROL, diag.sensitivity) &&
-        readRegister(address, CAP1188_REG_CONFIG1, diag.config1) &&
-        readRegister(address, CAP1188_REG_CONFIG2, diag.config2) &&
-        readRegister(address, CAP1188_REG_SENSOR_INPUT_ENABLE, diag.inputEnable) &&
-        readRegister(address, CAP1188_REG_MULTIPLE_TOUCH_CONFIG, diag.multiTouch) &&
-        readRegister(address, CAP1188_REG_RECALIBRATION_CONFIG, diag.recalConfig) &&
-        readRegister(address, CAP1188_REG_CALIBRATION_ACTIVE, diag.calibrationActive);
-    if (!answered) return;
+    // Indexed by DiagRegister.
+    uint8_t* const targets[DIAG_REGISTER_COUNT] = {
+        &diag.inputStatus, &diag.noiseFlags, &delta, &diag.generalStatus,
+        &diag.mainControl, &diag.baseCount, &calibrationHigh, &calibrationLow,
+        &diag.threshold, &diag.sensitivity, &diag.config1, &diag.config2,
+        &diag.inputEnable, &diag.multiTouch, &diag.recalConfig, &diag.calibrationActive,
+    };
+
+    // Every register on its own: a register this chip refuses is named in the
+    // reply instead of throwing away the fifteen it answered.
+    for (uint8_t i = 0; i < DIAG_REGISTER_COUNT; i++) {
+        DiagRegister reg = static_cast<DiagRegister>(i);
+        uint8_t regAddress = diagRegisterAddress(reg, ch);
+        bool answered = false;
+        for (uint8_t attempt = 0; attempt < SENSOR_DIAG_READ_ATTEMPTS && !answered; attempt++) {
+            answered = readRegister(address, regAddress, *targets[i]);
+        }
+        if (!answered) {
+            *targets[i] = 0;
+            diag.missing |= diagBit(reg);
+        }
+    }
+    const uint16_t everyRegister = (uint16_t)((1u << DIAG_REGISTER_COUNT) - 1);
+    if (diag.missing == everyRegister) return;
 
     diag.delta = static_cast<int8_t>(delta);
     diag.calibration = (uint16_t)(((uint16_t)calibrationHigh << 2) |
@@ -986,36 +1023,72 @@ void TouchController::readSensorDiag(uint8_t inputIndex, SensorDiag& diag) {
     diag.valid = true;
 }
 
+static void appendf(char* buffer, size_t size, size_t& used, const char* format, ...) {
+    if (used + 1 >= size) return;
+    va_list args;
+    va_start(args, format);
+    int written = vsnprintf(buffer + used, size - used, format, args);
+    va_end(args);
+    if (written <= 0) return;
+    used += (size_t)written < size - used ? (size_t)written : size - used - 1;
+}
+
 // Bit fields as two hex digits, quantities (delta, base, cal, thr) in decimal.
-// The longest reply is 143 characters and has to fit Event::extra.
+// A register that did not answer leaves its key out and is listed in `miss`
+// by its address, in read order; `cal` needs both of its registers. The full
+// reply is 143 characters; a missing register drops at least six and adds
+// three, so every reply fits Event::extra.
 static void formatSensorDiag(const SensorDiag& diag, char* buffer, size_t size) {
+    size_t used = 0;
+    buffer[0] = '\0';
     if (!diag.valid) {
-        snprintf(buffer, size, "valid=0 chip=%02X cs=%u",
-                 static_cast<unsigned>(diag.address),
-                 static_cast<unsigned>(diag.channel + 1));
+        appendf(buffer, size, used, "valid=0 chip=%02X cs=%u",
+                static_cast<unsigned>(diag.address),
+                static_cast<unsigned>(diag.channel + 1));
         return;
     }
-    snprintf(buffer, size,
-             "valid=1 chip=%02X cs=%u main=%02X gen=%02X stat=%02X noise=%02X"
-             " delta=%d base=%u cal=%u thr=%u"
-             " sens=%02X cfg=%02X cfg2=%02X en=%02X mt=%02X recal=%02X calact=%02X",
-             static_cast<unsigned>(diag.address),
-             static_cast<unsigned>(diag.channel + 1),
-             static_cast<unsigned>(diag.mainControl),
-             static_cast<unsigned>(diag.generalStatus),
-             static_cast<unsigned>(diag.inputStatus),
-             static_cast<unsigned>(diag.noiseFlags),
-             static_cast<int>(diag.delta),
-             static_cast<unsigned>(diag.baseCount),
-             static_cast<unsigned>(diag.calibration),
-             static_cast<unsigned>(diag.threshold),
-             static_cast<unsigned>(diag.sensitivity),
-             static_cast<unsigned>(diag.config1),
-             static_cast<unsigned>(diag.config2),
-             static_cast<unsigned>(diag.inputEnable),
-             static_cast<unsigned>(diag.multiTouch),
-             static_cast<unsigned>(diag.recalConfig),
-             static_cast<unsigned>(diag.calibrationActive));
+    auto has = [&diag](DiagRegister reg) { return (diag.missing & diagBit(reg)) == 0; };
+    auto hex = [&](DiagRegister reg, const char* key, uint8_t value) {
+        if (has(reg)) appendf(buffer, size, used, " %s=%02X", key, static_cast<unsigned>(value));
+    };
+
+    appendf(buffer, size, used, "valid=1 chip=%02X cs=%u",
+            static_cast<unsigned>(diag.address),
+            static_cast<unsigned>(diag.channel + 1));
+    hex(DiagRegister::MAIN_CONTROL, "main", diag.mainControl);
+    hex(DiagRegister::GENERAL_STATUS, "gen", diag.generalStatus);
+    hex(DiagRegister::INPUT_STATUS, "stat", diag.inputStatus);
+    hex(DiagRegister::NOISE_FLAGS, "noise", diag.noiseFlags);
+    if (has(DiagRegister::DELTA)) {
+        appendf(buffer, size, used, " delta=%d", static_cast<int>(diag.delta));
+    }
+    if (has(DiagRegister::BASE_COUNT)) {
+        appendf(buffer, size, used, " base=%u", static_cast<unsigned>(diag.baseCount));
+    }
+    if (has(DiagRegister::CALIBRATION) && has(DiagRegister::CALIBRATION_LSB)) {
+        appendf(buffer, size, used, " cal=%u", static_cast<unsigned>(diag.calibration));
+    }
+    if (has(DiagRegister::THRESHOLD)) {
+        appendf(buffer, size, used, " thr=%u", static_cast<unsigned>(diag.threshold));
+    }
+    hex(DiagRegister::SENSITIVITY, "sens", diag.sensitivity);
+    hex(DiagRegister::CONFIG1, "cfg", diag.config1);
+    hex(DiagRegister::CONFIG2, "cfg2", diag.config2);
+    hex(DiagRegister::INPUT_ENABLE, "en", diag.inputEnable);
+    hex(DiagRegister::MULTI_TOUCH, "mt", diag.multiTouch);
+    hex(DiagRegister::RECAL_CONFIG, "recal", diag.recalConfig);
+    hex(DiagRegister::CALIBRATION_ACTIVE, "calact", diag.calibrationActive);
+
+    if (diag.missing == 0) return;
+    appendf(buffer, size, used, " miss=");
+    bool first = true;
+    for (uint8_t i = 0; i < DIAG_REGISTER_COUNT; i++) {
+        DiagRegister reg = static_cast<DiagRegister>(i);
+        if (has(reg)) continue;
+        appendf(buffer, size, used, first ? "%02X" : ",%02X",
+                static_cast<unsigned>(diagRegisterAddress(reg, diag.channel)));
+        first = false;
+    }
 }
 
 void TouchController::processSensorDiagRequest() {

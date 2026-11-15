@@ -82,8 +82,33 @@ struct AnyCandidate {
 // looks healthy to the touch pipeline, and only these registers say whether
 // the chip blocks the channel (noise flag), lost its configuration (reset) or
 // is not scanning at all (standby). The Pi decides what the values mean.
+//
+// The registers SENSOR_DIAG reads, in read order: what changes from one
+// sensing cycle to the next comes first, so status, noise flag and delta of
+// one reply belong together. One bit each in SensorDiag::missing.
+enum class DiagRegister : uint8_t {
+    INPUT_STATUS,
+    NOISE_FLAGS,
+    DELTA,
+    GENERAL_STATUS,
+    MAIN_CONTROL,
+    BASE_COUNT,
+    CALIBRATION,        // upper eight bits of the calibration value
+    CALIBRATION_LSB,    // lower two bits, packed four channels to a register
+    THRESHOLD,
+    SENSITIVITY,
+    CONFIG1,
+    CONFIG2,
+    INPUT_ENABLE,
+    MULTI_TOUCH,
+    RECAL_CONFIG,
+    CALIBRATION_ACTIVE,
+    COUNT
+};
+
 struct SensorDiag {
-    bool valid;                 // Every register answered
+    bool valid;                 // At least one register answered
+    uint16_t missing;           // Bit per DiagRegister that did not answer, retry included
     uint8_t address;            // I2C address of the hold's chip
     uint8_t channel;            // 0..7 = CS1..CS8
     uint8_t mainControl;        // 0x00: gain, standby, deep sleep, INT
