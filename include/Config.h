@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.5.0"
+#define FIRMWARE_VERSION "1.6.0"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -307,7 +307,9 @@ constexpr uint16_t I2C_RETRY_DELAY_US = 100;
 // ============================================================================
 
 constexpr uint8_t CAP1188_REG_MAIN_CONTROL = 0x00;
+constexpr uint8_t CAP1188_REG_GENERAL_STATUS = 0x02;
 constexpr uint8_t CAP1188_REG_SENSOR_INPUT_STATUS = 0x03;
+constexpr uint8_t CAP1188_REG_NOISE_FLAG_STATUS = 0x0A;
 constexpr uint8_t CAP1188_REG_SENSOR_INPUT_DELTA_1 = 0x10;
 constexpr uint8_t CAP1188_REG_SENSITIVITY_CONTROL = 0x1F;
 constexpr uint8_t CAP1188_REG_CONFIG1 = 0x20;
@@ -317,9 +319,18 @@ constexpr uint8_t CAP1188_REG_CALIBRATION_ACTIVE = 0x26;
 constexpr uint8_t CAP1188_REG_INTERRUPT_ENABLE = 0x27;
 constexpr uint8_t CAP1188_REG_REPEAT_ENABLE = 0x28;
 constexpr uint8_t CAP1188_REG_MULTIPLE_TOUCH_CONFIG = 0x2A;
+constexpr uint8_t CAP1188_REG_RECALIBRATION_CONFIG = 0x2F;
 constexpr uint8_t CAP1188_REG_SENSOR_THRESHOLD_1 = 0x30;
 constexpr uint8_t CAP1188_REG_STANDBY_CONFIG = 0x41;
+constexpr uint8_t CAP1188_REG_CONFIG2 = 0x44;
+constexpr uint8_t CAP1188_REG_SENSOR_BASE_COUNT_1 = 0x50;
 constexpr uint8_t CAP1188_REG_LED_LINK = 0x72;
+// Analog calibration value of a channel, 10 bit: the upper eight in one
+// register per channel, the lower two packed four channels to a register
+// (CS1-CS4 in LSB_1, CS5-CS8 in LSB_2, two bits each, CS1/CS5 lowest).
+constexpr uint8_t CAP1188_REG_SENSOR_CALIBRATION_1 = 0xB1;
+constexpr uint8_t CAP1188_REG_CALIBRATION_LSB_1 = 0xB9;
+constexpr uint8_t CAP1188_REG_CALIBRATION_LSB_2 = 0xBA;
 constexpr uint8_t CAP1188_REG_PRODUCT_ID = 0xFD;
 constexpr uint8_t CAP1188_REG_MANUFACTURER_ID = 0xFE;
 constexpr uint8_t CAP1188_REG_REVISION = 0xFF;

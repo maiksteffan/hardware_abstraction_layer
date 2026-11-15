@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.5.0` |
+| `FIRMWARE_VERSION` | `1.6.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -241,6 +241,30 @@ distinguish sensor silence, invalid I2C reads, consumption and delivery gating.
 Only one diagnostic request should be outstanding; a newer request replaces
 an undelivered one. Existing protocol messages/ids are unchanged.
 
+**Chip-register diagnosis (since 1.6.0):** `TOUCH_STATE` shows the firmware's
+own view, and that view is clean when a CAP1188 blocks a channel itself: the
+status read is valid, the hold is simply never reported as touched, and `VALUE`
+reads 0 even under a hand. The chip forces a channel's delta to 0 while its
+noise detector flags it (signal outside the analog block's operating region,
+low-frequency or RF noise - both filters are on by default and the firmware
+does not touch them), and its automatic recalibration is digital only, so such
+a channel stays dead until `RECALIBRATE` redoes the analog calibration too.
+`SENSOR_DIAG <pos> [#id]` reads the registers that tell these states apart
+(`SensorDiag` in TouchController.h): noise flags, status, delta, base count,
+the 10-bit analog calibration value, threshold, main control (standby / deep
+sleep / gain), general status, input enable, both configuration registers,
+recalibration configuration, calibration-activate and the multiple-touch
+register - the last one is written 0x00 by `initSensor()`, so its power-on
+value 0x80 means the chip restarted after the firmware configured it.
+Like `TOUCH_STATE` it is requested by the command core and served by the
+polling core, so its sixteen reads cannot interleave with a status poll; they
+take longer than one poll interval (one late poll per request), are done once
+per request, and a reply the event queue refuses is offered again from the
+stored copy. It reads only - no INT clear, no recalibration - because the
+state it shows is exactly what a recalibration erases. The firmware interprets
+nothing; the Pi names the findings (`backend/app/services/sensor_diagnostics.py`).
+One outstanding request; a newer one replaces an undelivered one.
+
 **Hands-off detection:** while enabled, emits `HANDS_ON`/`HANDS_OFF` on
 board-occupancy transitions; enabling reports the current state immediately.
 The 500 ms release latch means `HANDS_OFF` lags the last release by ~0.5 s.
@@ -397,6 +421,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `RECALIBRATE_ALL [#id]` | `ACK`, then `RECALIBRATED ALL [#id]` | Recalibrate all enabled channels |
 | `VALUE <pos> [#id]` | `VALUE <pos> <delta> [#id]` | Signed delta register (-128..127) |
 | `TOUCH_STATE <pos> [#id]` | `ACK`, then `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` | Non-mutating polling-core diagnostic; `raw` is cached when `valid=0`; `expect`/`pending` refer to single-hold EXPECT. One outstanding request, newest replaces undelivered request |
+| `SENSOR_DIAG <pos> [#id]` | `ACK`, then `SENSOR_DIAG <pos> valid=1 chip=<hex> cs=<1-8> main=<hex> gen=<hex> stat=<hex> noise=<hex> delta=<n> base=<n> cal=<n> thr=<n> sens=<hex> cfg=<hex> cfg2=<hex> en=<hex> mt=<hex> recal=<hex> calact=<hex> [#id]` | The CAP1188 registers behind the position, read on the polling core without changing anything (see 2.5). Bit fields are two hex digits without prefix, quantities (`delta` signed, `base`, `cal` 0-1023, `thr`) decimal; chip-wide registers are reported whole, per-channel ones for the position's channel `cs`. A chip that stops answering mid-read replies `valid=0 chip=<hex> cs=<1-8>` only. `ERR sensor_inactive` instead of the `ACK` when the sensor failed init. One outstanding request, newest replaces an undelivered one. Announced as `features=sensordiag` |
 | `SET_SENSITIVITY <pos> <0-7> [#id]` | `ACK` | 0 = most sensitive. ⚠ Global per CAP1188 chip |
 | `GET_SENSITIVITY <pos> [#id]` | `SENSITIVITY <pos> <0-7> [#id]` | The level the position's chip runs at, read back from the chip — so also what a neighbour on the same chip last set. No `ACK`, like `VALUE`. `ERR sensor_inactive` when the sensor failed init or does not answer. Announced as `features=sensitivity` |
 | `HANDSOFF_DETECTION_ON [#id]` | `ACK` + immediate `HANDS_ON`/`HANDS_OFF` | Enable occupancy events, report current state once |
@@ -407,7 +432,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.5.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.6.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -418,7 +443,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|
 | `ACK` | `ACK <ACTION> [<pos>] [#id]` |
 | `DONE` | `DONE <ACTION> [<pos>] [#id]` |
-| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `sensor_inactive` (`VALUE` / `GET_SENSITIVITY` on a sensor that does not answer), `unknown_board_version` (boot only) |
+| `ERR` | `ERR <reason> [#id]` — reasons: `unknown_action`, `unknown_position`, `bad_format`, `invalid_level`, `command_failed`, `sensor_inactive` (`VALUE` / `GET_SENSITIVITY` on a sensor that does not answer, `SENSOR_DIAG` on one that failed init), `unknown_board_version` (boot only) |
 | `BUSY` | `BUSY [#id]` (queue full — Pi retries) |
 | `TOUCHED` / `TOUCH_RELEASED` | `TOUCHED <pos> [#id]` |
 | `SCANNED` | `SCANNED [<pos>,...] [#id]` |
@@ -426,7 +451,8 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `VALUE` | `VALUE <pos> <delta> [#id]` |
 | `SENSITIVITY` | `SENSITIVITY <pos> <level> [#id]` — reply to `GET_SENSITIVITY` only |
 | `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0) |
+| `SENSOR_DIAG` | `SENSOR_DIAG <pos> valid=1 chip=<hex> cs=<1-8> main=<hex> gen=<hex> stat=<hex> noise=<hex> delta=<n> base=<n> cal=<n> thr=<n> sens=<hex> cfg=<hex> cfg2=<hex> en=<hex> mt=<hex> recal=<hex> calact=<hex> [#id]` — reply to `SENSOR_DIAG` only, after its `ACK`; `valid=0 chip=<hex> cs=<1-8>` when the chip stopped answering |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0; `sensordiag` = SENSOR_DIAG, since 1.6.0) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
@@ -580,6 +606,7 @@ mode: every hold is armed, so brush-bys during reaching must be filtered.
 |---|---|---|
 | Sensor list | `GET /api/hardware/sensors` | `SCAN` |
 | Read sensor delta | `GET /api/hardware/sensor/{pos}/value` | `VALUE <pos>` |
+| Diagnose a dead hold | `GET /api/hardware/sensor/{pos}/diagnostics` | `SENSOR_DIAG <pos>` (the Pi turns the registers into findings) |
 | Recalibrate one/all | `POST .../recalibrate`, `/api/hardware/calibrate` | `RECALIBRATE`, `RECALIBRATE_ALL` |
 | Sensitivity get/set | `GET/POST .../sensor/{pos}/sensitivity`, all holds: `GET/POST /api/hardware/sensitivity` | `GET_SENSITIVITY`, `SET_SENSITIVITY` (all holds = one command per hold) |
 | LED tests | `/api/hardware/led/*` | `SHOW`, `HIDE_ALL`, `SUCCESS`, `FAIL`, `BLINK`, `SEQUENCE_COMPLETED`, `DEFEAT_ANIMATION` |
@@ -697,6 +724,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.6.0 | Diagnosis for a hold that stops registering touches until it is recalibrated: new `SENSOR_DIAG <pos>` replies `ACK`, then one line with the CAP1188 registers behind the position (noise flags, status, delta, base count, 10-bit calibration value, threshold, main control, general status, input enable, configuration 1/2, recalibration configuration, calibration-activate, multiple-touch configuration). Read on the polling core, once per request, without writing anything to the chip; `ERR sensor_inactive` for a sensor that failed init, `valid=0` for a chip that stops answering. The firmware interprets nothing - the Pi names what the values mean. `INFO` gains `features=sensordiag`. Every existing command is unchanged; the cause of the reported dead holds is not fixed by this release, only made visible |
 | 1.5.0 | Sensitivity can be read back: new `GET_SENSITIVITY <pos>` answers `SENSITIVITY <pos> <0-7>` with the level the position's CAP1188 runs at (bits 6:4 of its sensitivity register), `ERR sensor_inactive` for a sensor that failed init or does not answer. The Pi already spoke the command; the firmware answered `ERR unknown_action` until now. `INFO` gains `features=sensitivity`. Every existing command is unchanged |
 | 1.4.0 | Per-board LED offset: new `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs either way along the track, for a wall whose strip or hold sits slightly off the profile's index. The Pi stores the correction and sends it after every boot; the firmware keeps it in RAM (`LedOffsets`, pure and host-tested in `LedOffset.h`) and applies it in the one lookup every paint path uses (`LedController::ledIndex()`), mirror included. A lit position moves at once. `TRACK` reports the moved indices; `INFO` gains `features=ledoffset`. Profiles and every existing command are unchanged, offset 0 is exactly the profile |
 | 1.3.19 | Automated release; see Git history and GitHub release notes for changes. |

@@ -71,6 +71,12 @@ bool EventQueue::queueTouchState(const char* position, const char* state, uint32
     snprintf(g_events[g_count - 1].extra, sizeof(Event::extra), "%s", state);
     return true;
 }
+bool EventQueue::queueSensorDiag(const char* position, const char* registers, uint32_t id) {
+    if (g_eventMutexBusy) return false;
+    if (!capture(EventType::SENSOR_DIAG, position, id)) return false;
+    snprintf(g_events[g_count - 1].extra, sizeof(Event::extra), "%s", registers);
+    return true;
+}
 void CommandController::indexToPosition(uint8_t index, char out[POSITION_STRING_LENGTH]) {
     snprintf(out, POSITION_STRING_LENGTH, "H%02u", static_cast<unsigned>(index + 1));
 }
@@ -605,6 +611,129 @@ void test_touch_state_retries_without_reading_deltas_or_consuming_touch() {
     expectEvent(1, EventType::TOUCHED, 301, "H01");
 }
 
+// First hold of the active profile wired to a channel in [fromChannel, toChannel].
+static uint8_t holdOnChannel(uint8_t fromChannel, uint8_t toChannel) {
+    const BoardProfile& profile = activeBoardProfile();
+    for (uint8_t i = 0; i < profile.holdCount; i++) {
+        uint8_t channel = profile.inputMappings[i].channel;
+        if (channel >= fromChannel && channel <= toChannel) return i;
+    }
+    TEST_FAIL_MESSAGE("profile has no hold on that channel range");
+    return 0;
+}
+
+static uint8_t* chipRegisters(uint8_t input) {
+    const BoardProfile& profile = activeBoardProfile();
+    return Wire.registers[profile.sensorAddresses[profile.inputMappings[input].sensorIndex]];
+}
+
+void test_sensor_diag_reports_the_registers_behind_the_hold() {
+    // A blocked channel: the chip flags noise on it and holds its delta at 0.
+    uint8_t input = holdOnChannel(0, 3);
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t channel = profile.inputMappings[input].channel;
+    uint8_t address = profile.sensorAddresses[profile.inputMappings[input].sensorIndex];
+    uint8_t* chip = chipRegisters(input);
+    chip[CAP1188_REG_NOISE_FLAG_STATUS] = (uint8_t)(1u << channel);
+    chip[CAP1188_REG_SENSOR_BASE_COUNT_1 + channel] = 200;
+    chip[CAP1188_REG_SENSOR_CALIBRATION_1 + channel] = 0x69;
+    chip[CAP1188_REG_CALIBRATION_LSB_1] = (uint8_t)(0x02u << (channel * 2));
+    chip[CAP1188_REG_SENSOR_THRESHOLD_1 + channel] = 0x40;
+    chip[CAP1188_REG_CONFIG1] = 0x20;
+    chip[CAP1188_REG_CONFIG2] = 0x40;
+    chip[CAP1188_REG_RECALIBRATION_CONFIG] = 0x8A;
+
+    char position[POSITION_STRING_LENGTH];
+    CommandController::indexToPosition(input, position);
+    g_touch.requestSensorDiag(input, 400);
+    advance(5);
+
+    char expected[sizeof(Event::extra)];
+    snprintf(expected, sizeof(expected),
+             "valid=1 chip=%02X cs=%u main=00 gen=00 stat=00 noise=%02X"
+             " delta=0 base=200 cal=422 thr=64"
+             " sens=20 cfg=20 cfg2=40 en=%02X mt=00 recal=8A calact=00",
+             address, channel + 1, 1u << channel,
+             chip[CAP1188_REG_SENSOR_INPUT_ENABLE]);
+    expectEvent(0, EventType::SENSOR_DIAG, 400, position);
+    TEST_ASSERT_EQUAL_STRING(expected, g_events[0].extra);
+    advance(20);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);  // one reply per request
+}
+
+void test_sensor_diag_reads_the_upper_channels_calibration_from_the_second_lsb_register() {
+    uint8_t input = holdOnChannel(4, 7);
+    uint8_t channel = activeBoardProfile().inputMappings[input].channel;
+    uint8_t* chip = chipRegisters(input);
+    chip[CAP1188_REG_SENSOR_CALIBRATION_1 + channel] = 0xFF;
+    chip[CAP1188_REG_CALIBRATION_LSB_1] = 0x00;
+    chip[CAP1188_REG_CALIBRATION_LSB_2] = (uint8_t)(0x03u << ((channel - 4) * 2));
+    chip[CAP1188_REG_SENSOR_INPUT_DELTA_1 + channel] = 0x80;  // most negative delta
+
+    g_touch.requestSensorDiag(input, 401);
+    advance(5);
+
+    TEST_ASSERT_NOT_NULL(strstr(g_events[0].extra, " cal=1023 "));
+    TEST_ASSERT_NOT_NULL(strstr(g_events[0].extra, " delta=-128 "));
+}
+
+void test_sensor_diag_changes_nothing_on_the_chip() {
+    // The point of the diagnosis is the state a recalibration would erase.
+    uint8_t input = holdOnChannel(0, 7);
+    uint8_t* chip = chipRegisters(input);
+    chip[CAP1188_REG_GENERAL_STATUS] = 0x08;   // RESET flag, cleared with INT
+    chip[CAP1188_REG_MAIN_CONTROL] = 0x01;     // INT pending
+    chip[CAP1188_REG_NOISE_FLAG_STATUS] = 0xFF;
+    uint8_t before[256];
+    memcpy(before, chip, sizeof(before));
+
+    g_touch.requestSensorDiag(input, 402);
+    advance(20);
+
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(before, chip, sizeof(before));
+    TEST_ASSERT_NOT_NULL(strstr(g_events[0].extra, " main=01 gen=08 "));
+}
+
+void test_sensor_diag_retries_delivery_without_reading_the_chip_again() {
+    g_touch.requestSensorDiag(0, 403);
+    g_eventMutexBusy = true;
+    advance(20);
+    TEST_ASSERT_EQUAL_UINT8(0, g_count);
+    TEST_ASSERT_EQUAL_UINT32(1, Wire.deltaReads);
+    g_eventMutexBusy = false;
+    advance(5);
+    expectEvent(0, EventType::SENSOR_DIAG, 403, "H01");
+    TEST_ASSERT_EQUAL_UINT32(1, Wire.deltaReads);
+}
+
+void test_newer_sensor_diag_request_replaces_an_undelivered_one() {
+    g_eventMutexBusy = true;
+    g_touch.requestSensorDiag(0, 404);
+    advance(5);
+    g_touch.requestSensorDiag(1, 405);
+    g_eventMutexBusy = false;
+    advance(10);
+    TEST_ASSERT_EQUAL_UINT8(1, g_count);
+    expectEvent(0, EventType::SENSOR_DIAG, 405, "H02");
+    TEST_ASSERT_EQUAL_UINT32(2, Wire.deltaReads);  // read again for the other hold
+}
+
+void test_sensor_diag_of_a_chip_that_stops_answering_says_so() {
+    const BoardProfile& profile = activeBoardProfile();
+    uint8_t address = profile.sensorAddresses[profile.inputMappings[0].sensorIndex];
+    Wire.failStatus[address] = true;
+
+    g_touch.requestSensorDiag(0, 406);
+    advance(5);
+
+    char expected[sizeof(Event::extra)];
+    snprintf(expected, sizeof(expected), "valid=0 chip=%02X cs=%u",
+             address, profile.inputMappings[0].channel + 1);
+    expectEvent(0, EventType::SENSOR_DIAG, 406, "H01");
+    TEST_ASSERT_EQUAL_STRING(expected, g_events[0].extra);
+}
+
 void test_occupancy_delivery_retries_without_blocking_poll() {
     contact(0, true);
     advance(10);
@@ -658,6 +787,12 @@ int main() {
     RUN_TEST(test_normal_scan_overruns_do_not_lengthen_release_latch);
     RUN_TEST(test_touch_state_explains_consumed_and_release_latched_input);
     RUN_TEST(test_touch_state_retries_without_reading_deltas_or_consuming_touch);
+    RUN_TEST(test_sensor_diag_reports_the_registers_behind_the_hold);
+    RUN_TEST(test_sensor_diag_reads_the_upper_channels_calibration_from_the_second_lsb_register);
+    RUN_TEST(test_sensor_diag_changes_nothing_on_the_chip);
+    RUN_TEST(test_sensor_diag_retries_delivery_without_reading_the_chip_again);
+    RUN_TEST(test_newer_sensor_diag_request_replaces_an_undelivered_one);
+    RUN_TEST(test_sensor_diag_of_a_chip_that_stops_answering_says_so);
     RUN_TEST(test_occupancy_delivery_retries_without_blocking_poll);
     return UNITY_END();
 }

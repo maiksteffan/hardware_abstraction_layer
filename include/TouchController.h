@@ -76,6 +76,33 @@ struct AnyCandidate {
     uint8_t untouchedStreak;    // Consecutive raw-untouched poll samples
 };
 
+// One hold's CAP1188 registers as the chip holds them right now (SENSOR_DIAG).
+// Chip-wide registers are reported whole, per-channel ones for the hold's
+// channel only. Nothing is interpreted here: a hold whose delta is stuck at 0
+// looks healthy to the touch pipeline, and only these registers say whether
+// the chip blocks the channel (noise flag), lost its configuration (reset) or
+// is not scanning at all (standby). The Pi decides what the values mean.
+struct SensorDiag {
+    bool valid;                 // Every register answered
+    uint8_t address;            // I2C address of the hold's chip
+    uint8_t channel;            // 0..7 = CS1..CS8
+    uint8_t mainControl;        // 0x00: gain, standby, deep sleep, INT
+    uint8_t generalStatus;      // 0x02: reset, multiple-touch block, touch
+    uint8_t inputStatus;        // 0x03: touched channels
+    uint8_t noiseFlags;         // 0x0A: channels whose delta the chip forces to 0
+    int8_t delta;               // 0x10+ch: what VALUE reports
+    uint8_t baseCount;          // 0x50+ch: the "not touched" reference
+    uint16_t calibration;       // 0xB1+ch and LSB register: analog calibration, 10 bit
+    uint8_t threshold;          // 0x30+ch: delta that counts as a touch
+    uint8_t sensitivity;        // 0x1F: delta sense and base shift
+    uint8_t config1;            // 0x20: noise filters, max duration
+    uint8_t config2;            // 0x44: RF noise filter
+    uint8_t inputEnable;        // 0x21: scanned channels
+    uint8_t multiTouch;         // 0x2A: written 0x00 at init, 0x80 after a chip reset
+    uint8_t recalConfig;        // 0x2F: automatic recalibration
+    uint8_t calibrationActive;  // 0x26: channels still calibrating
+};
+
 // ============================================================================
 // TouchController Class
 // ============================================================================
@@ -146,6 +173,10 @@ public:
     bool readSensorValue(uint8_t inputIndex, int8_t& value);
     // On-demand snapshot built on the polling core; no additional I2C traffic.
     void requestTouchState(uint8_t inputIndex, uint32_t commandId);
+    // On-demand read of the input's chip registers (SensorDiag), done on the
+    // polling core so it cannot interleave with a status poll. Reads only: no
+    // INT clear, no recalibration, nothing the chip state depends on.
+    void requestSensorDiag(uint8_t inputIndex, uint32_t commandId);
 
 private:
     EventQueue* m_eventQueue;
@@ -160,6 +191,11 @@ private:
     uint8_t m_pendingAnyInput;
     PointExpectation m_touchStateRequest;
     uint8_t m_touchStateInput;
+    PointExpectation m_sensorDiagRequest;
+    uint8_t m_sensorDiagInput;
+    SensorDiag m_sensorDiag;           // Registers read for m_sensorDiagRevision
+    uint32_t m_sensorDiagRevision;     // Request the copy above answers
+    bool m_sensorDiagRead;             // Polling core only
     ExpectState m_expectAnyQueue[EXPECT_ANY_QUEUE_SIZE];
     uint8_t m_expectAnyHead;   // Next write index
     uint8_t m_expectAnyTail;   // Next read index
@@ -180,6 +216,8 @@ private:
     void processPointExpectations();  // Claim states and retry rejected events every tick
     void processPendingAnyTouch();    // Retry an already-qualified EXPECT_ANY event
     void processTouchStateRequest();  // Nonblocking, on-demand diagnostic reply
+    void processSensorDiagRequest();  // Read the registers once, retry delivery only
+    void readSensorDiag(uint8_t inputIndex, SensorDiag& diag);
     void processExpectAnyQualification();  // Advance/finish EXPECT_ANY candidates
     void startAnyCandidate(uint8_t inputIndex, uint32_t now);
     void recordPressEdge(uint32_t now);    // Sweep detection bookkeeping

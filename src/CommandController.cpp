@@ -351,6 +351,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "RECALIBRATE_ALL", len)) return CommandAction::RECALIBRATE_ALL;
     if (strcasecmpN(str, "VALUE", len)) return CommandAction::VALUE;
     if (strcasecmpN(str, "TOUCH_STATE", len)) return CommandAction::TOUCH_STATE;
+    if (strcasecmpN(str, "SENSOR_DIAG", len)) return CommandAction::SENSOR_DIAG;
     if (strcasecmpN(str, "SET_SENSITIVITY", len)) return CommandAction::SET_SENSITIVITY;
     if (strcasecmpN(str, "GET_SENSITIVITY", len)) return CommandAction::GET_SENSITIVITY;
     if (strcasecmpN(str, "SCAN", len)) return CommandAction::SCAN;
@@ -391,6 +392,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::RECALIBRATE_ALL: return "RECALIBRATE_ALL";
         case CommandAction::VALUE: return "VALUE";
         case CommandAction::TOUCH_STATE: return "TOUCH_STATE";
+        case CommandAction::SENSOR_DIAG: return "SENSOR_DIAG";
         case CommandAction::SET_SENSITIVITY: return "SET_SENSITIVITY";
         case CommandAction::GET_SENSITIVITY: return "GET_SENSITIVITY";
         case CommandAction::SCAN: return "SCAN";
@@ -427,6 +429,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::RECALIBRATE:
         case CommandAction::VALUE:
         case CommandAction::TOUCH_STATE:
+        case CommandAction::SENSOR_DIAG:
         case CommandAction::SET_SENSITIVITY:
         case CommandAction::GET_SENSITIVITY:
             return true;
@@ -669,6 +672,22 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             if (m_touchController) {
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
                 m_touchController->requestTouchState(cmd.positionIndex, cmdId);
+            } else {
+                m_eventQueue.queueError("no_touch_controller", cmdId);
+            }
+            break;
+
+        case CommandAction::SENSOR_DIAG:
+            if (m_touchController) {
+                // The registers are read on the polling core, so the reply
+                // follows the ACK within a poll or two. A sensor that failed
+                // init has nothing to read: same answer as VALUE.
+                if (m_touchController->isInputActive(cmd.positionIndex)) {
+                    m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+                    m_touchController->requestSensorDiag(cmd.positionIndex, cmdId);
+                } else {
+                    m_eventQueue.queueError("sensor_inactive", cmdId);
+                }
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }

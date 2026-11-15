@@ -32,7 +32,8 @@ enum class EventType : uint8_t {
     SENSITIVITY,    // Sensor sensitivity level response
     HANDS_ON,       // Hands-off detection: board went from untouched to touched
     HANDS_OFF,      // Hands-off detection: board went from touched to untouched
-    TOUCH_STATE     // On-demand touch pipeline diagnostic snapshot
+    TOUCH_STATE,    // On-demand touch pipeline diagnostic snapshot
+    SENSOR_DIAG     // On-demand CAP1188 register snapshot of one hold
 };
 
 // ============================================================================
@@ -88,7 +89,8 @@ public:
     bool queueHandsOn(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     bool queueHandsOff(uint32_t commandId = COMMAND_ID_NONE, uint16_t timeoutMs = MUTEX_TIMEOUT_QUEUE_MS);
     bool queueTouchState(const char* position, const char* state, uint32_t commandId);
-    
+    bool queueSensorDiag(const char* position, const char* registers, uint32_t commandId);
+
     // Synchronous output that bypasses the queue, for replies longer than the
     // queue should carry (TRACK: one line per hold). Main loop only, and
     // flush() first so replies queued earlier still arrive first. Blocks for

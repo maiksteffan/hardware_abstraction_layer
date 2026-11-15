@@ -82,6 +82,9 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   so the holds of a chip share it; RAM only, a boot restores the default and
   the Pi sends its stored levels again.
   `INFO` announces the read as `features=sensitivity`.
+- **Sensor diagnosis:** `SENSOR_DIAG <pos>` reads the CAP1188 registers behind
+  a hold without changing anything, for a hold that stops registering touches
+  until it is recalibrated. `INFO` announces it as `features=sensordiag`.
 - **Boot handshake:** LED sweep → sensor init → `SENSORS READY` →
   `HARDWARE INITIALISED`, with `DIAG` output for troubleshooting.
 
@@ -127,6 +130,19 @@ does not read extra I2C registers, and does not change expectations or touch sta
 - `expect=0`: no single-hold press expectation is armed.
 - `expect=1 pending=1`: a touch was detected and is awaiting queue delivery.
 - `age_ms>2000` on an unconsumed held input: too old to satisfy a newly armed `EXPECT`.
+
+If the snapshot looks healthy (`valid=1 raw=0`, nothing consumed) and `VALUE`
+still reads 0 under a hand, the chip itself is blocking the channel. Send
+`SENSOR_DIAG H05 #124` next - still before recalibrating, which erases that
+state. It replies `ACK SENSOR_DIAG H05 #124`, then one
+`SENSOR_DIAG H05 valid=1 chip=.. cs=.. main=.. gen=.. stat=.. noise=.. delta=.. base=.. cal=.. thr=.. sens=.. cfg=.. cfg2=.. en=.. mt=.. recal=.. calact=.. #124`
+line (bit fields in hex, `delta`/`base`/`cal`/`thr` decimal):
+
+- bit `cs-1` set in `noise`: the chip flags noise on the channel and holds its delta at 0.
+- `mt=80`: the chip restarted after the firmware configured it (the firmware writes `00`).
+- `main` bit 5 / bit 4: standby / deep sleep, the chip is not scanning.
+- bit `cs-1` clear in `en`, or set in `calact`: channel switched off / calibration unfinished.
+- none of these: compare `base` and `cal` with a healthy hold, or with the same hold after recalibrating.
 
 Only one diagnostic query should be outstanding at a time; a new query replaces
 an undelivered snapshot request. Stop the Pi's serial connection before opening
