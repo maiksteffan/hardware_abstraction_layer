@@ -84,11 +84,11 @@ public:
     // The same gauge in the SHOW color: the next hold as a fuse that burns
     // down while the Pi's time to grab it runs out. Green stays "done".
     bool showGauge(uint8_t position, uint8_t percent);
-    // The next hold as a burning fuse: the same block in the SHOW color, but
-    // shrinking without steps and with a flickering spark at its burning end
-    // (FuseGauge.h). <permille> is the time left, absolute like the gauges;
-    // 0 is the center LED alone, as a glowing spark. The firmware keeps no
-    // timer - only the spark's flicker runs on its own.
+    // The next hold as a blue bar that shrinks while its time runs out: the
+    // SHOW_GAUGE block, but per mille and without steps - the LED at the end
+    // of the bar is dimmed by how much of it is still covered (FuseGauge.h).
+    // <permille> is the time left, absolute like the gauges; 0 is the center
+    // LED alone. A static state: the firmware keeps no timer.
     bool fuse(uint8_t position, uint16_t permille);
     
     // Sequence animation
@@ -165,9 +165,6 @@ private:
     // LED_OFFSET corrections, applied in ledIndex()
     LedOffsets m_ledOffsets;
 
-    // State of the spark's flicker (fuseFlicker in FuseGauge.h), never 0
-    uint32_t m_fuseNoise;
-
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
     const LedMirror* getMirror(uint8_t position) const;
@@ -201,8 +198,8 @@ private:
     // HOLD_GAUGE and SHOW_GAUGE: the same state and geometry, only the color
     // differs.
     bool gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t g, uint8_t b);
-    // Draw the whole fuse span from the position's permille, every LED with a
-    // new flicker of the spark, dark beyond the burning end.
+    // Draw the whole fuse span from the position's permille, the LED at the
+    // end of the bar dimmed, dark beyond it.
     void paintFuse(uint8_t position);
     // Repaint a position from its state alone (static states; a running
     // expansion is drawn at its current step). Used to restore what the

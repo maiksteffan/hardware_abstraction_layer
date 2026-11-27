@@ -41,7 +41,6 @@ LedController::LedController()
     , m_snakeR(0)
     , m_snakeG(0)
     , m_snakeB(0)
-    , m_fuseNoise(0x2545F491u)
 {
 }
 
@@ -99,12 +98,6 @@ void LedController::update(uint32_t nowMillis) {
             updateAnimation(i, nowMillis);
         } else if (m_positions[i].state == PositionState::CONTRACTING) {
             updateContractAnimation(i, nowMillis);
-        } else if (m_positions[i].state == PositionState::FUSE &&
-                   nowMillis - m_positions[i].lastAnimationTime >= LED_FUSE_FLICKER_MS) {
-            // The spark flickers on while the Pi has not sent a new time
-            paintFuse(i);
-            m_positions[i].lastAnimationTime = nowMillis;
-            m_needsUpdate = true;
         }
     }
     
@@ -447,13 +440,12 @@ bool LedController::fuse(uint8_t position, uint16_t permille) {
     data.expansionRadius = 0;
     data.blinkOn = false;
     data.fusePermille = (permille > FUSE_PERMILLE_MAX) ? FUSE_PERMILLE_MAX : permille;
-    // The fuse is the SHOW color; kept as the core color like a gauge's, so a
+    // The bar is the SHOW color; kept as the core color like a gauge's, so a
     // HOLD_GAUGE or SHOW_GAUGE afterwards starts from a known block.
     setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
 
     // Whatever the position showed before, paintFuse() covers the whole span
     paintFuse(position);
-    data.lastAnimationTime = millis();
     m_needsUpdate = true;
     return true;
 }
@@ -465,19 +457,13 @@ void LedController::paintFuse(uint8_t position) {
 
     for (int16_t offset = -(int16_t)maxLevel; offset <= (int16_t)maxLevel; offset++) {
         const uint8_t distance = (uint8_t)((offset < 0) ? -offset : offset);
+        // Full LEDs in the SHOW color, the one at the end dimmed, the rest
+        // dark; a mirror shows the same as its primary
         const uint8_t fill = fuseFill(edge, distance);
-        if (fill == 0) {
-            paintGaugeLed(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-            continue;
-        }
-        // Each LED flickers on its own, so the spark sparkles instead of
-        // pulsing as one; a mirror shows the same as its primary.
-        const uint8_t spark = fuseSpark(edge, distance);
-        const uint8_t flicker = spark ? fuseFlicker(m_fuseNoise, LED_FUSE_FLICKER_MIN) : 255;
         paintGaugeLed(position, offset,
-                      fuseChannel(COLOR_SHOW_R, COLOR_FUSE_SPARK_R, spark, flicker, fill),
-                      fuseChannel(COLOR_SHOW_G, COLOR_FUSE_SPARK_G, spark, flicker, fill),
-                      fuseChannel(COLOR_SHOW_B, COLOR_FUSE_SPARK_B, spark, flicker, fill));
+                      fuseChannel(COLOR_SHOW_R, fill),
+                      fuseChannel(COLOR_SHOW_G, fill),
+                      fuseChannel(COLOR_SHOW_B, fill));
     }
 }
 

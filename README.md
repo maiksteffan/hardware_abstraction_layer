@@ -75,8 +75,8 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   announces support as `features=holdgauge`. `SHOW_GAUGE <pos> <0-100>` is the
   same gauge in the SHOW color, for the next hold of a timed game as a fuse
   that burns down; `INFO` announces it as `features=showgauge`.
-  `FUSE <pos> <0-1000>` draws that fuse without steps and with a flickering
-  spark at its burning end; `INFO` announces it as `features=fuse`.
+  `FUSE <pos> <0-1000>` draws it as a blue bar that shrinks without steps,
+  dimming the LED at its end; `INFO` announces it as `features=fuse`.
 - **LED offset:** `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs
   either way along the track, for a wall whose strip sits slightly off the
   profile. The Pi stores the correction per board and sends it after every
@@ -99,7 +99,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 | `LedController` | Position→LED mapping, all animations, snake overlay |
 | `SnakeTrack.h` | Track math for `TRACK`/`SNAKE` (pure, host-tested) |
 | `HoldGauge.h` | Gauge geometry for `HOLD_GAUGE` / `SHOW_GAUGE` (pure, host-tested) |
-| `FuseGauge.h` | Fuse geometry for `FUSE`: cover, spark, flicker (pure, host-tested) |
+| `FuseGauge.h` | Bar geometry for `FUSE`: how far each LED is lit (pure, host-tested) |
 | `LedOffset.h` | Per-board LED corrections for `LED_OFFSET` (pure, host-tested) |
 | `TouchController` | CAP1188 driver, debounce, touch expectations |
 | `StartupController` | Boot sequence & Pi handshake |

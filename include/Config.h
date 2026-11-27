@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.8.0"
+#define FIRMWARE_VERSION "1.8.1"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -260,14 +260,6 @@ constexpr uint16_t LED_DEFEAT_STEP_MS = 10;
 // in the board profile. The Pi enforces the same bound.
 constexpr int8_t LED_OFFSET_MAX = 5;
 
-// FUSE: the next hold of a timed game as a burning fuse (FuseGauge.h). The Pi
-// sends the time left about every 40 ms; each FUSE draws a new flicker of the
-// spark, and without one the spark still flickers this often. Longer than the
-// Pi's tick, so a running fuse costs no extra frames.
-constexpr uint16_t LED_FUSE_FLICKER_MS = 50;
-// Dimmest the spark flickers down to, of 255
-constexpr uint8_t LED_FUSE_FLICKER_MIN = 110;
-
 // ============================================================================
 // 8. COLORS (RGB format, 0-255 per channel)
 // ============================================================================
@@ -286,12 +278,6 @@ constexpr uint8_t COLOR_SUCCESS_B = 0;
 constexpr uint8_t COLOR_BLINK_R = 0;
 constexpr uint8_t COLOR_BLINK_G = 255;    // Green
 constexpr uint8_t COLOR_BLINK_B = 0;
-
-// State: FUSE spark, the glowing end of the fuse (the fuse itself is SHOW).
-// Warm amber against the purple-blue; to be tuned on the wall.
-constexpr uint8_t COLOR_FUSE_SPARK_R = 255;
-constexpr uint8_t COLOR_FUSE_SPARK_G = 120;
-constexpr uint8_t COLOR_FUSE_SPARK_B = 20;
 
 // State: FAIL (error indicator)
 constexpr uint8_t COLOR_FAIL_R = 255;     // Red

@@ -21,9 +21,9 @@
  *                                   as a fuse burning down while the time to grab it
  *                                   runs out. HOLD_GAUGE / SHOW_GAUGE on a gauge of the
  *                                   other color recolor the whole block
- *   FUSE <pos> <0-1000> [#id]     - The next hold as a burning fuse: the SHOW_GAUGE block,
- *                                   but per mille, shrinking without steps and with a
- *                                   flickering spark at its burning end. Absolute value
+ *   FUSE <pos> <0-1000> [#id]     - The next hold as a blue bar that shrinks without steps:
+ *                                   the SHOW_GAUGE block per mille, the LED at its end
+ *                                   dimmed by how much of it is left. Absolute value
  *   LED_OFFSET <pos> <n> [#id]    - Move the position's block n LEDs along the track
  *                                   (-LED_OFFSET_MAX..LED_OFFSET_MAX, 0 = the profile's
  *                                   place). This board's own correction, sent by the Pi
