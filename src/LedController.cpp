@@ -176,7 +176,12 @@ void LedController::hideAll() {
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
     }
+    // Every full-board animation ends here; its queued command reports DONE on
+    // the next tick. A defeat left running repainted the whole board red every
+    // step and blanked it at its end, wiping whatever the Pi lit after this
+    // HIDE_ALL - a game restarted during the pulses stayed dark.
     m_sequenceAnimActive = false;
+    m_defeatAnimActive = false;
     m_menuChangeActive = false;
     // The strips are already blank, so there is nothing to restore under it.
     m_snakeActive = false;

@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.7.0` |
+| `FIRMWARE_VERSION` | `1.7.1` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -307,6 +307,11 @@ Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
   expansion, contract, blink, sequence-completed pulses, defeat pulses,
   menu-change sweep. Async commands report `DONE` via
   `CommandController::tickCommand()` polling `is...Complete()`.
+- `HIDE_ALL` ends every full-board animation (sequence-completed, defeat,
+  menu change), and its command reports `DONE` on the next tick. A full-board
+  animation repaints every LED each step and blanks the board at its end, so
+  one left running would wipe whatever the Pi lights after the `HIDE_ALL` -
+  the Pi starts every run with one.
 
 ### Hold-time gauge
 
@@ -425,7 +430,7 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 |---|---|---|
 | `SHOW <pos> [#id]` | `ACK` | Hold on in SHOW color (purple) |
 | `HIDE <pos> [#id]` | `ACK` | Hold off |
-| `HIDE_ALL [#id]` | `ACK` | Whole board off (also clears recording glow) |
+| `HIDE_ALL [#id]` | `ACK` | Whole board off (also clears recording glow, the snake overlay and a running full-board animation, whose `DONE` follows at once; the defeat pulses only since 1.7.1) |
 | `FAIL <pos> [#id]` | `ACK` | Hold red |
 | `BLINK <pos> [#id]` / `STOP_BLINK <pos> [#id]` | `ACK` | Green blink on/off |
 | `EXPAND_STEP <pos> [#id]` / `CONTRACT_STEP <pos> [#id]` | `ACK` | Grow/shrink lit area by 1 LED per side |
@@ -470,7 +475,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.7.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.7.1 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -765,6 +770,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.7.1 | `HIDE_ALL` ends the defeat pulses, like it already ended the celebration pulses and the menu sweep. `hideAll()` left `m_defeatAnimActive` set, so `DEFEAT_ANIMATION` kept painting the whole board red every step and blanked it at its end - including every hold the Pi lit after its `HIDE_ALL`. Seen in Fuse: "play again" tapped while the wall still pulsed red started the run with both start holds dark, the screen asking to grab them. The Pi sends the result first and the defeat after, and it stops waiting for `DONE` when a new run starts, so any game restarted within the ~2 s of pulses hit it. The defeat's `DONE` now follows the `HIDE_ALL` on the next tick. Protocol unchanged; the Pi also waits for that `DONE` after a `HIDE_ALL`, so it copes with 1.7.0 and older too |
 | 1.7.0 | Countdown fuse: new `SHOW_GAUGE <pos> <0-100>` draws the hold-time gauge in the SHOW color, so the Pi can show the next hold of a timed game as a fuse that burns down while the time to grab it runs out - green stays "done". Same geometry, errors and `GAUGE` state as `HOLD_GAUGE`; both go through `LedController::gauge()`, and the gauge keeps its color as the position's core color, which `paintGauge()` (before: always green) and the snake's repaint use. Switching a hold between the two colors repaints the whole block. `INFO` gains `features=showgauge`. Every existing command is unchanged. Not yet checked on a wall |
 | 1.6.2 | `SENSOR_DIAG` names a register the chip refuses instead of calling the chip silent. Its sixteen reads were one `&&` chain, so a single refused register made the whole reply `valid=0 chip=.. cs=..`, which the Pi shows as "the chip stopped answering". Seen on the `dev-5hold` wall: H04's chip (0x1F, a CT188-1 clone with the same product id as its neighbours) failed the diagnosis every time while `VALUE` read it fine. Each register is now read on its own and tried twice (`SENSOR_DIAG_READ_ATTEMPTS`); one that still fails leaves its key out and is listed by address in a trailing `miss=`, and `valid=0` is left for a chip that answers none. Additive: a Pi that does not know `miss` ignores it and reads what is there. Which register H04 refuses is not known yet - that is what this release reports |
 | 1.6.1 | Two cores on one I²C bus no longer read each other's registers. A register read was a pointer write with a stop, then a read; the Wire lock is held per transaction, so `VALUE`, `GET_SENSITIVITY`, `SET_SENSITIVITY` or `RECALIBRATE` on the command core could repoint a chip between the two halves of a poll read, and the poll between the halves of theirs. The poll then took a delta for the status byte of one sample (enough for a false touch, since a press counts at once) or for `MAIN_CONTROL`, which it wrote back with INT cleared - standby, deep sleep or another gain, holds dead until a recalibration or reboot; `VALUE` could answer with the status byte and `SET_SENSITIVITY` wipe the base shift. `readRegister()` now sends pointer and read as one transaction (repeated start), and INT is cleared by writing `CAP1188_MAIN_CONTROL_ACTIVE` instead of read-modify-write, which also saves one read per touched chip and poll and puts a chip with a changed gain right again. Only reachable while the Pi sends one of those commands, i.e. from the calibration screen and the sensitivity replay after boot, not during a game. Protocol unchanged. Found by reading the code; not observed on a wall, and the repeated-start read is untested on hardware - check `SCAN`, a touch and `SENSOR_DIAG` after flashing |
