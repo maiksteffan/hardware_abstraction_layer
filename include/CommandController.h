@@ -9,11 +9,8 @@
  *   HIDE <pos> [#id]              - Turn off LED
  *   SUCCESS <pos> [#id]           - Play green expansion animation
  *   FAIL <pos> [#id]              - Show red LED (error indicator)
- *   CONTRACT <pos> [#id]          - Contract expanded LED back to single
  *   BLINK <pos> [#id]             - Start blinking (orange, fast)
  *   STOP_BLINK <pos> [#id]        - Stop blinking
- *   EXPAND_STEP <pos> [#id]       - Expand lit area by 1 LED on each side
- *   CONTRACT_STEP <pos> [#id]     - Contract lit area by 1 LED on each side
  *   HOLD_GAUGE <pos> <0-100> [#id] - Green block scaled to that share of its full
  *                                   width, as a hold-time gauge (100 = full SUCCESS
  *                                   block, 0 = center LED only). Absolute value
@@ -21,11 +18,15 @@
  *                                   as a fuse burning down while the time to grab it
  *                                   runs out. HOLD_GAUGE / SHOW_GAUGE on a gauge of the
  *                                   other color recolor the whole block
+ *   SHOW_BAR <pos> <0-1000> [#id] - The next hold as a blue bar that shrinks without steps:
+ *                                   the SHOW_GAUGE block per mille, the LED at its end
+ *                                   dimmed by how much of it is left. Absolute value
+ *   HOLD_BAR <pos> <0-1000> [#id] - The same bar in green: the HOLD_GAUGE block without
+ *                                   steps, how much longer a hold must stay gripped
  *   LED_OFFSET <pos> <n> [#id]    - Move the position's block n LEDs along the track
  *                                   (-LED_OFFSET_MAX..LED_OFFSET_MAX, 0 = the profile's
  *                                   place). This board's own correction, sent by the Pi
  *                                   after every connect; RAM only. See LedOffset.h
- *   MENUE_CHANGE <r,g,b> <range>  - Expand animation on both strips from 0 to range
  *   SEQUENCE_COMPLETED [#id]      - Play celebration animation
  *   DEFEAT_ANIMATION [#id]        - Play defeat animation (red full-board pulses)
  *   INDICATE_RECORDING [#id]      - Light all positions static dim white (clear with HIDE_ALL)
@@ -36,7 +37,6 @@
  * 
  * Touch Commands:
  *   EXPECT <pos> [#id]            - Wait for fresh unconsumed touch; evaluated each poll
- *   EXPECT_ANY [#id]              - First qualified, fresh, unconsumed grab (also across rearm gaps)
  *   EXPECT_ANY_EXCEPT [<pos>...] [#id] - Wait for any touch except the listed positions
  *   EXPECT_RELEASE <pos> [#id]    - Wait for debounced release; reports retry on queue pressure
  *   RECALIBRATE <pos> [#id]       - Recalibrate single sensor
@@ -82,17 +82,14 @@ enum class CommandAction : uint8_t {
     HIDE_ALL,
     SUCCESS,
     FAIL,
-    CONTRACT,
     BLINK,
     STOP_BLINK,
-    EXPAND_STEP,
-    CONTRACT_STEP,
     HOLD_GAUGE,
     SHOW_GAUGE,
+    SHOW_BAR,
+    HOLD_BAR,
     LED_OFFSET,
-    MENUE_CHANGE,
     EXPECT,
-    EXPECT_ANY,
     EXPECT_ANY_EXCEPT,
     EXPECT_RELEASE,
     RECALIBRATE,
@@ -129,8 +126,8 @@ struct ParsedCommand {
     uint32_t id;
     uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE / SHOW_GAUGE percent)
     int8_t ledOffset;    // LED_OFFSET: LEDs along the track, -LED_OFFSET_MAX..LED_OFFSET_MAX
-    uint8_t r, g, b;     // RGB color for MENUE_CHANGE
-    uint8_t range;       // Range for MENUE_CHANGE
+    uint16_t permille;   // SHOW_BAR / HOLD_BAR: time left, 0..BAR_PERMILLE_MAX
+    uint8_t r, g, b;     // SNAKE: RGB color
     int32_t snakeStart;  // SNAKE: first track index (may be negative; clamped)
     uint16_t snakeLength; // SNAKE: number of LEDs
     HoldMask excludeMask; // EXPECT_ANY_EXCEPT: bit i set => input i is excluded

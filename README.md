@@ -49,7 +49,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 - **Touch intelligence:** asymmetric debouncing, one-shot expectations,
   single-consumption press edges (a held hold can't satisfy two EXPECTs),
   brush-by rejection for recording mode, hands-off/presence events.
-  Fresh grabs are tracked even between `EXPECT_ANY` commands, so releasing
+  Fresh grabs are tracked even between `EXPECT_ANY_EXCEPT` commands, so releasing
   one hold and grabbing the next before the Pi re-arms does not lose the
   next touch. Unconsumed grabs recover from brief sensor dropouts without
   requiring a full release. The release latch remains 500 ms; it does not
@@ -62,7 +62,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   Polling-core event submissions never wait for the queue mutex. Failed I2C
   status reads pause release evidence instead of restarting the whole latch;
   periodic errors therefore cannot keep an otherwise released hold consumed
-  forever. Recording delta reads are skipped when no `EXPECT_ANY` is armed.
+  forever. Recording delta reads are skipped when no `EXPECT_ANY_EXCEPT` is armed.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its
@@ -75,6 +75,10 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   announces support as `features=holdgauge`. `SHOW_GAUGE <pos> <0-100>` is the
   same gauge in the SHOW color, for the next hold of a timed game as a fuse
   that burns down; `INFO` announces it as `features=showgauge`.
+  `SHOW_BAR <pos> <0-1000>` draws it as a blue bar that shrinks without
+  steps, dimming the LED at its end; `HOLD_BAR <pos> <0-1000>` is the same bar
+  in green, for the hold-time gauge. `INFO` announces them as
+  `features=showbar` and `features=holdbar`.
 - **LED offset:** `LED_OFFSET <pos> <n>` moves a hold's LED block up to 5 LEDs
   either way along the track, for a wall whose strip sits slightly off the
   profile. The Pi stores the correction per board and sends it after every
@@ -97,6 +101,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 | `LedController` | Position→LED mapping, all animations, snake overlay |
 | `SnakeTrack.h` | Track math for `TRACK`/`SNAKE` (pure, host-tested) |
 | `HoldGauge.h` | Gauge geometry for `HOLD_GAUGE` / `SHOW_GAUGE` (pure, host-tested) |
+| `BarGauge.h` | Bar geometry for `SHOW_BAR` / `HOLD_BAR`: how far each LED is lit (pure, host-tested) |
 | `LedOffset.h` | Per-board LED corrections for `LED_OFFSET` (pure, host-tested) |
 | `TouchController` | CAP1188 driver, debounce, touch expectations |
 | `StartupController` | Boot sequence & Pi handshake |

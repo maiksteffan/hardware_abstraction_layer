@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.7.1` |
+| `FIRMWARE_VERSION` | `1.10.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -203,7 +203,7 @@ release from stale cached state. A consumed
 hold still needs the full release latch before re-grabbing it can count again.
 
 **Single-consumption rule (`pressConsumed`, critical fix in v1.0.4):** each
-debounced press edge may satisfy **exactly one** `EXPECT`/`EXPECT_ANY`. Set
+debounced press edge may satisfy **exactly one** `EXPECT`/`EXPECT_ANY_EXCEPT`. Set
 when a `TOUCHED` is reported, cleared only on genuine release + re-grab.
 Without it, a continuously held hold satisfied every re-armed `EXPECT` within
 the freshness window and alternating two-hold sequences ping-ponged instantly
@@ -236,7 +236,7 @@ Point/ANY reports retry without blocking, as do current occupancy transitions.
 Command-side queue calls keep their existing timeout.
 
 **EXPECT_ANY qualification (brush-by rejection):** `EXPECT <pos>` is instant
-(only the armed hold can fire), but `EXPECT_ANY` arms every hold, so a new
+(only the armed hold can fire), but `EXPECT_ANY_EXCEPT` arms every hold but the listed ones, so a new
 press must survive a 150 ms confirmation window (`AnyCandidate`):
 persistence (≥3 consecutive untouched samples cancels), delta consistency
 (≥70 % of samples with CAP1188 delta ≥ 48; degrades gracefully on I²C
@@ -304,11 +304,11 @@ Disabled by `HANDSOFF_DETECTION_OFF` and by `CLEAN_QUEUE`.
 - Colors (Config.h §8): **SHOW = dark purple (80,0,205)**, SUCCESS/BLINK = green,
   FAIL = red, RECORD glow = dim white (30,30,30).
 - Animations (all non-blocking, stepped in `tick()` on Core 1): success
-  expansion, contract, blink, sequence-completed pulses, defeat pulses,
-  menu-change sweep. Async commands report `DONE` via
+  expansion, blink, sequence-completed pulses, defeat pulses. Async commands
+  report `DONE` via
   `CommandController::tickCommand()` polling `is...Complete()`.
-- `HIDE_ALL` ends every full-board animation (sequence-completed, defeat,
-  menu change), and its command reports `DONE` on the next tick. A full-board
+- `HIDE_ALL` ends every full-board animation (sequence-completed, defeat),
+  and its command reports `DONE` on the next tick. A full-board
   animation repaints every LED each step and blanks the board at its end, so
   one left running would wipe whatever the Pi lights after the `HIDE_ALL` -
   the Pi starts every run with one.
@@ -324,7 +324,7 @@ hold has 7 levels (1/3/5/7/9/11/13 LEDs).
 
 Workouts can require a hold to stay gripped for a minimum time; the Pi ticks
 the remaining percentage down and the block shrinks with it. The value is
-**absolute**, not relative like `CONTRACT_STEP`, so a dropped command is
+**absolute**, not a step up or down, so a dropped command is
 corrected by the next one, and the firmware keeps no timer: it never decides
 when the hold time is over. `PositionState::GAUGE` is a static state — `SHOW`,
 `SUCCESS`, `FAIL`, `HIDE` and `HIDE_ALL` clear it like an expanded block, and
@@ -339,6 +339,28 @@ restores. `paintGauge()` always draws the whole span, lit or dark, so
 `HOLD_GAUGE` on a blue fuse (or `SHOW_GAUGE` on a green gauge) recolors the
 whole block in one command — the Pi paints a grabbed hold green with
 `HOLD_GAUGE <pos> 100`. The firmware keeps no timer here either.
+
+### Smooth bars: SHOW_BAR and HOLD_BAR
+
+`SHOW_BAR <pos> <0-1000>` and `HOLD_BAR <pos> <0-1000>` (since 1.9.0) are the
+two gauges without steps: the `SHOW_GAUGE` block in blue (the next hold of the
+game Fuse, its time to be grabbed running out) and the `HOLD_GAUGE` block in
+green (how much longer a workout hold must stay gripped). Same run of LEDs,
+but per mille (geometry in the pure, host-tested
+[include/BarGauge.h](include/BarGauge.h)): the LED at the end of the bar is
+only partly lit, so the bar shrinks continuously instead of in seven steps.
+The cover is squared before it dims the LED (LEDs look brighter than their
+share of light), so the end fades out evenly. At 0 the center LED alone stays
+on, like a gauge at 0: the Pi decides when the time is over. The Pi sends a
+bar about every 40 ms.
+
+Both share `LedController::bar()` and `PositionState::BAR`, a static state
+like `GAUGE`: the color is kept as the core color (so switching between blue
+and green, or to a gauge, repaints the whole block), it is cleared by `SHOW`,
+`SUCCESS`, `FAIL`, `HIDE` and `HIDE_ALL`, and covers the full block for the
+snake. The firmware keeps no timer. The Pi uses `SHOW_BAR` when `INFO` lists
+`features=showbar` and `HOLD_BAR` when it lists `features=holdbar`, else the
+stepped gauges.
 
 ### LED offset (per-board correction)
 
@@ -386,8 +408,8 @@ backend owns the snake, the firmware only paints where it is told. The
 backend moves it up to ~40×/s, so a move is cheap: LEDs the snake leaves go
 dark, the positions whose block (core, expansion rings, mirror) touches them
 are repainted from their state (`repaintPosition()`; `PositionData` keeps
-the core color because `SHOWN` may be purple, red after `FAIL` or green after
-`CONTRACT`), and `update()` repaints the snake before every `show()`, so
+the core color because `SHOWN` may be purple or red after `FAIL`), and
+`update()` repaints the snake before every `show()`, so
 running animations (success expansion, blink, full-board pulses) never draw
 over it. `HIDE_ALL` drops the overlay too.
 
@@ -433,21 +455,20 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 | `HIDE_ALL [#id]` | `ACK` | Whole board off (also clears recording glow, the snake overlay and a running full-board animation, whose `DONE` follows at once; the defeat pulses only since 1.7.1) |
 | `FAIL <pos> [#id]` | `ACK` | Hold red |
 | `BLINK <pos> [#id]` / `STOP_BLINK <pos> [#id]` | `ACK` | Green blink on/off |
-| `EXPAND_STEP <pos> [#id]` / `CONTRACT_STEP <pos> [#id]` | `ACK` | Grow/shrink lit area by 1 LED per side |
 | `HOLD_GAUGE <pos> <0-100> [#id]` | `ACK` | Green block scaled to that share of its full width (hold-time gauge, see 2.6). Absolute; 0 leaves the center LED on. Out of range → `ERR invalid_level`, missing value → `ERR bad_format`. Firmware with `features=holdgauge` only |
 | `SHOW_GAUGE <pos> <0-100> [#id]` | `ACK` | Like `HOLD_GAUGE`, in the SHOW color: the next hold as a fuse burning down (see 2.6). Either gauge command on a gauge of the other color recolors the whole block. Same errors as `HOLD_GAUGE`. Firmware with `features=showgauge` only |
+| `SHOW_BAR <pos> <0-1000> [#id]` | `ACK` | The next hold as a blue bar that shrinks without steps (see 2.6, Smooth bars): the `SHOW_GAUGE` block per mille, the LED at its end dimmed by how much of it is left. Absolute; 0 leaves the center LED on. Out of range → `ERR invalid_level`, missing value → `ERR bad_format`. Firmware with `features=showbar` only |
+| `HOLD_BAR <pos> <0-1000> [#id]` | `ACK` | The same bar in green: the `HOLD_GAUGE` block per mille without steps, how much longer a hold must stay gripped (see 2.6, Smooth bars). Same values and errors as `SHOW_BAR`. Firmware with `features=holdbar` only |
 | `LED_OFFSET <pos> <n> [#id]` | `ACK` | Move the hold's block `n` LEDs along the track, `-5..5`, sign optional (`-2`, `3`, `+3`); 0 = the profile's place (per-board correction, see 2.6). RAM only, cleared on boot. Missing or malformed value → `ERR bad_format`, beyond the bound → `ERR invalid_level` (both without id, like every parse error), block center off its strip → `ERR invalid_level #id`. Firmware with `features=ledoffset` only |
 | `INDICATE_RECORDING [#id]` | `ACK` | All holds static dim white |
 | `SUCCESS <pos> [#id]` | `ACK` → `DONE` | **Async**: green expansion animation |
-| `CONTRACT <pos> [#id]` | `ACK` → `DONE` | **Async**: contract expanded area |
 | `SEQUENCE_COMPLETED [#id]` | `ACK` → `DONE` | **Async**: full-board victory pulses |
 | `DEFEAT_ANIMATION [#id]` | `ACK` → `DONE` | **Async**: red full-board pulses |
-| `MENUE_CHANGE <r,g,b> <range> [#id]` | `ACK` → `DONE` | **Async**: color sweep to `<range>` (spelling "MENUE" is intentional) |
 | `SNAKE <start> <len> [r,g,b] [#id]` | `ACK SNAKE [#id]` | Overlay track span `[start, start+len)` (see 2.6), default red `255,0,0`; clamped to the track, `start` may be negative. Moves the existing overlay. Malformed → `ERR bad_format` |
 | `SNAKE_OFF [#id]` | `ACK SNAKE_OFF [#id]` | Remove the overlay, restoring what it covered |
 
-Async commands (`SUCCESS`, `CONTRACT`, `SEQUENCE_COMPLETED`,
-`DEFEAT_ANIMATION`, `MENUE_CHANGE`) get an immediate `ACK`, run via
+Async commands (`SUCCESS`, `SEQUENCE_COMPLETED`, `DEFEAT_ANIMATION`) get an
+immediate `ACK`, run via
 `CommandController::tick()`, and emit `DONE` when finished. If the 32-slot
 queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 
@@ -457,8 +478,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 |---|---|---|
 | `EXPECT <pos> [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | One-shot press detection. Evaluated each poll; an already-held input must have valid raw contact, be fresh (≤2 s) AND not yet consumed (§2.5). Matched reports retry on outgoing queue pressure |
 | `EXPECT_RELEASE <pos> [#id]` | `ACK`, later `TOUCH_RELEASED <pos> [#id]` | One-shot release; an already-released input reports on the next valid poll. Matched reports retry on outgoing queue pressure |
-| `EXPECT_ANY [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | First *qualified* new touch anywhere; queued (max 8 concurrent) |
-| `EXPECT_ANY_EXCEPT [<pos> ...] [#id]` | like `EXPECT_ANY` | Listed positions excluded |
+| `EXPECT_ANY_EXCEPT [<pos> ...] [#id]` | `ACK`, later `TOUCHED <pos> [#id]` | First *qualified* new touch on any hold but the listed ones (none listed: any hold); queued (max 8 concurrent) |
 | `CLEAN_QUEUE [#id]` | `ACK` | Clears ALL expectations + EXPECT_ANY queue, disables hands-off detection |
 | `RECALIBRATE <pos> [#id]` | `ACK`, then `RECALIBRATED <pos> [#id]` | Recalibrate one channel |
 | `RECALIBRATE_ALL [#id]` | `ACK`, then `RECALIBRATED ALL [#id]` | Recalibrate all enabled channels |
@@ -475,7 +495,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.7.1 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.10.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge,showbar,holdbar boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -495,7 +515,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `SENSITIVITY` | `SENSITIVITY <pos> <level> [#id]` — reply to `GET_SENSITIVITY` only |
 | `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
 | `SENSOR_DIAG` | `SENSOR_DIAG <pos> valid=1 chip=<hex> cs=<1-8> main=<hex> gen=<hex> stat=<hex> noise=<hex> delta=<n> base=<n> cal=<n> thr=<n> sens=<hex> cfg=<hex> cfg2=<hex> en=<hex> mt=<hex> recal=<hex> calact=<hex> [miss=<hex>,...] [#id]` — reply to `SENSOR_DIAG` only, after its `ACK`; keys of registers that did not answer are left out and listed in `miss`; `valid=0 chip=<hex> cs=<1-8>` when the chip answered none |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0; `sensordiag` = SENSOR_DIAG, since 1.6.0; `showgauge` = SHOW_GAUGE, since 1.7.0) |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0; `sensordiag` = SENSOR_DIAG, since 1.6.0; `showgauge` = SHOW_GAUGE, since 1.7.0; `showbar` = SHOW_BAR and `holdbar` = HOLD_BAR, since 1.9.0; test releases 1.8.x announced `fuse` = FUSE, which is gone) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
@@ -600,10 +620,11 @@ on the missed hold(s), `DEFEAT_ANIMATION`, `sequence_aborted` broadcast.
 **Minimum hold time (Pi-side, workouts only):** a workout step may require its
 hold(s) to stay gripped for a whole number of seconds. The step's holds carry
 it in the sequence text (`H05@3`), so only the Pi ever knows about it. After
-the touch the Pi plays `SUCCESS`, then ticks `HOLD_GAUGE <pos> <percent>` down
-while watching `EXPECT_RELEASE`; letting go restarts the time, and the next
+the touch the Pi plays `SUCCESS`, then ticks `HOLD_BAR <pos> <permille>`
+down about every 40 ms (`HOLD_GAUGE <pos> <percent>` every 150 ms on firmware
+without `features=holdbar`) while watching `EXPECT_RELEASE`; letting go restarts the time, and the next
 hold is only shown once it is served. Steps without a hold time behave exactly
-as before — no `HOLD_GAUGE` is sent at all.
+as before — no gauge is sent at all.
 
 **Victory:** all steps done → `SEQUENCE_COMPLETED` (full-board pulses) +
 `sequence_complete` broadcast.
@@ -747,6 +768,7 @@ hardware_abstraction_layer/
 │   ├── BoardProfile.h        # per-board wiring types, ceilings, profile registry API
 │   ├── SnakeTrack.h          # both strips as one track (TRACK/SNAKE), pure, host-tested
 │   ├── LedOffset.h           # per-board LED corrections (LED_OFFSET), pure, host-tested
+│   ├── BarGauge.h            # bar geometry for SHOW_BAR / HOLD_BAR (how far each LED is lit), pure, host-tested
 │   ├── CommandController.h
 │   ├── EventQueue.h
 │   ├── LedController.h
@@ -770,6 +792,10 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.10.0 | Removes five commands no Pi version sends any more: `EXPAND_STEP`, `CONTRACT_STEP` (never sent), `CONTRACT` (last sent before the first versioned Pi release), `MENUE_CHANGE` (last sent by Pi software before 1.4.20, in its LED test only) and `EXPECT_ANY` (never sent; `EXPECT_ANY_EXCEPT` with an empty list does the same). They answer `ERR unknown_action` now. Gone with them: `PositionState::CONTRACTING`, the expansion radius of `SHOWN` (only `EXPAND_STEP` set it), the menu-change sweep and `LED_MENU_CHANGE_STEP_MS`. `TouchController::setExpectAny()` stays as the internal any-hold expectation. Every other command is unchanged |
+| 1.9.0 | Gauges without steps, under names that say what they are: `SHOW_BAR <pos> <0-1000>` (the blue bar, what 1.8.x called `FUSE`) and new `HOLD_BAR <pos> <0-1000>`, the same bar in green for the hold-time gauge - the `HOLD_GAUGE` block per mille, the LED at its end dimmed. Both go through `LedController::bar()` and `PositionState::BAR`, keeping the bar's color as the core color like `gauge()` does; geometry in `BarGauge.h` (was `FuseGauge.h`). `INFO` announces `features=showbar,holdbar`; `FUSE` and `features=fuse` are gone - they only ever shipped in the test releases 1.8.0/1.8.1 from an unmerged branch, and the Pi falls back to `SHOW_GAUGE` on those. Every other command is unchanged |
+| 1.8.1 | `FUSE` draws a plain blue bar: the spark and its flicker are gone, the bar still shrinks without steps (the LED at its end dimmed, its cover squared). On the wall the spark read as a fuse animation where a shrinking bar was wanted. `FUSE` is a static state again - no timer, no frames of its own; `LED_FUSE_FLICKER_*` and `COLOR_FUSE_SPARK_*` are gone. Command, values and `features=fuse` unchanged |
+| 1.8.0 | Fuse with a spark: new `FUSE <pos> <0-1000>` draws Fuse's next hold as a burning fuse - the `SHOW_GAUGE` block, but per mille and without steps (the LED at the burning end is partly lit, its cover squared so it fades out evenly), and with a warm amber spark at the burning end that slides inward with it and flickers per LED (`LED_FUSE_FLICKER_MIN`, every `LED_FUSE_FLICKER_MS` without a new `FUSE`). Geometry and mixing in the pure, host-tested `FuseGauge.h`. New `PositionState::FUSE`, cleared and covered like a gauge. `INFO` gains `features=fuse`; the Pi keeps `SHOW_GAUGE` on older firmware. Every existing command is unchanged. Colors and flicker are starting values, not yet seen on a wall |
 | 1.7.1 | `HIDE_ALL` ends the defeat pulses, like it already ended the celebration pulses and the menu sweep. `hideAll()` left `m_defeatAnimActive` set, so `DEFEAT_ANIMATION` kept painting the whole board red every step and blanked it at its end - including every hold the Pi lit after its `HIDE_ALL`. Seen in Fuse: "play again" tapped while the wall still pulsed red started the run with both start holds dark, the screen asking to grab them. The Pi sends the result first and the defeat after, and it stops waiting for `DONE` when a new run starts, so any game restarted within the ~2 s of pulses hit it. The defeat's `DONE` now follows the `HIDE_ALL` on the next tick. Protocol unchanged; the Pi also waits for that `DONE` after a `HIDE_ALL`, so it copes with 1.7.0 and older too |
 | 1.7.0 | Countdown fuse: new `SHOW_GAUGE <pos> <0-100>` draws the hold-time gauge in the SHOW color, so the Pi can show the next hold of a timed game as a fuse that burns down while the time to grab it runs out - green stays "done". Same geometry, errors and `GAUGE` state as `HOLD_GAUGE`; both go through `LedController::gauge()`, and the gauge keeps its color as the position's core color, which `paintGauge()` (before: always green) and the snake's repaint use. Switching a hold between the two colors repaints the whole block. `INFO` gains `features=showgauge`. Every existing command is unchanged. Not yet checked on a wall |
 | 1.6.2 | `SENSOR_DIAG` names a register the chip refuses instead of calling the chip silent. Its sixteen reads were one `&&` chain, so a single refused register made the whole reply `valid=0 chip=.. cs=..`, which the Pi shows as "the chip stopped answering". Seen on the `dev-5hold` wall: H04's chip (0x1F, a CT188-1 clone with the same product id as its neighbours) failed the diagnosis every time while `VALUE` read it fine. Each register is now read on its own and tried twice (`SENSOR_DIAG_READ_ATTEMPTS`); one that still fails leaves its key out and is listed by address in a trailing `miss=`, and `valid=0` is left for a chip that answers none. Additive: a Pi that does not know `miss` ignores it and reads what is there. Which register H04 refuses is not known yet - that is what this release reports |

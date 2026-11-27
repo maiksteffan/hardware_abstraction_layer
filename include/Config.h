@@ -31,7 +31,7 @@
 // 1. FIRMWARE METADATA
 // ============================================================================
 
-#define FIRMWARE_VERSION "1.7.1"
+#define FIRMWARE_VERSION "1.10.0"
 #define PROTOCOL_VERSION "3"   // v3 = 3-char position tokens H01..H{holdCount} (see the active board profile)
 #ifndef BOARD_TYPE
 #define BOARD_TYPE "ESP32_S3_DEVKITC_1"
@@ -240,7 +240,6 @@ constexpr uint8_t LED_BRIGHTNESS_DEFAULT = 255;  // 0-255
 constexpr uint16_t LED_ANIMATION_STEP_MS = 25;
 constexpr uint16_t LED_BLINK_INTERVAL_MS = 150;
 constexpr uint16_t LED_SEQUENCE_STEP_MS = 10;
-constexpr uint16_t LED_MENU_CHANGE_STEP_MS = 1;
 
 // Animation parameters
 constexpr uint8_t LED_SUCCESS_EXPANSION_RADIUS = 4;
