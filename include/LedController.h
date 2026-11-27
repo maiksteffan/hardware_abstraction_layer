@@ -32,7 +32,7 @@ enum class PositionState : uint8_t {
     CONTRACTING,
     BLINKING,
     GAUGE,
-    FUSE
+    BAR
 };
 
 struct PositionData {
@@ -44,8 +44,9 @@ struct PositionData {
     // GAUGE only: how far out the block still reaches, in physical LEDs from
     // the center (0 = just the center LED). See holdGauge() / showGauge().
     uint8_t gaugeLevel;
-    // FUSE only: the time left, 0-1000 per mille (see FuseGauge.h)
-    uint16_t fusePermille;
+    // BAR only: the time left, 0-1000 per mille (BarGauge.h).
+    // The bar is drawn in the core color, like a gauge.
+    uint16_t barPermille;
     // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
     // a red core and a finished CONTRACT a green one, and repaintPosition()
     // has to restore the right one after the snake passed over it.
@@ -86,10 +87,13 @@ public:
     bool showGauge(uint8_t position, uint8_t percent);
     // The next hold as a blue bar that shrinks while its time runs out: the
     // SHOW_GAUGE block, but per mille and without steps - the LED at the end
-    // of the bar is dimmed by how much of it is still covered (FuseGauge.h).
+    // of the bar is dimmed by how much of it is still covered (BarGauge.h).
     // <permille> is the time left, absolute like the gauges; 0 is the center
     // LED alone. A static state: the firmware keeps no timer.
-    bool fuse(uint8_t position, uint16_t permille);
+    bool showBar(uint8_t position, uint16_t permille);
+    // The same bar in green: the HOLD_GAUGE block without steps, how much
+    // longer a hold must stay gripped.
+    bool holdBar(uint8_t position, uint16_t permille);
     
     // Sequence animation
     void startSequenceCompletedAnimation();
@@ -198,9 +202,11 @@ private:
     // HOLD_GAUGE and SHOW_GAUGE: the same state and geometry, only the color
     // differs.
     bool gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t g, uint8_t b);
-    // Draw the whole fuse span from the position's permille, the LED at the
-    // end of the bar dimmed, dark beyond it.
-    void paintFuse(uint8_t position);
+    // SHOW_BAR and HOLD_BAR: the same state and geometry, only the color differs.
+    bool bar(uint8_t position, uint16_t permille, uint8_t r, uint8_t g, uint8_t b);
+    // Draw the whole bar span from the position's permille in its core
+    // color, the LED at the end of the bar dimmed, dark beyond it.
+    void paintBar(uint8_t position);
     // Repaint a position from its state alone (static states; a running
     // expansion is drawn at its current step). Used to restore what the
     // snake covered.

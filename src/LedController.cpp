@@ -8,7 +8,7 @@
  */
 
 #include "LedController.h"
-#include "FuseGauge.h"
+#include "BarGauge.h"
 #include "HoldGauge.h"
 #include "SnakeTrack.h"
 
@@ -73,7 +73,7 @@ void LedController::begin() {
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
         m_positions[i].gaugeLevel = 0;
-        m_positions[i].fusePermille = 0;
+        m_positions[i].barPermille = 0;
         setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     }
     // Offsets belong to the board the Pi describes after connecting, never to
@@ -135,7 +135,7 @@ bool LedController::show(uint8_t position) {
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
         m_positions[position].state == PositionState::GAUGE ||
-        m_positions[position].state == PositionState::FUSE ||
+        m_positions[position].state == PositionState::BAR ||
         m_positions[position].expansionRadius > 0) {
         clearExpandedRegion(position, mapping);
     }
@@ -201,7 +201,7 @@ bool LedController::success(uint8_t position) {
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
         m_positions[position].state == PositionState::GAUGE ||
-        m_positions[position].state == PositionState::FUSE) {
+        m_positions[position].state == PositionState::BAR) {
         clearExpandedRegion(position, mapping);
     } else if (m_positions[position].state == PositionState::SHOWN ||
                m_positions[position].state == PositionState::BLINKING) {
@@ -229,7 +229,7 @@ bool LedController::fail(uint8_t position) {
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
         m_positions[position].state == PositionState::GAUGE ||
-        m_positions[position].state == PositionState::FUSE) {
+        m_positions[position].state == PositionState::BAR) {
         clearExpandedRegion(position, mapping);
     }
     
@@ -428,42 +428,51 @@ bool LedController::gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t 
     return true;
 }
 
-bool LedController::fuse(uint8_t position, uint16_t permille) {
+bool LedController::showBar(uint8_t position, uint16_t permille) {
+    return bar(position, permille, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+}
+
+bool LedController::holdBar(uint8_t position, uint16_t permille) {
+    return bar(position, permille, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+}
+
+bool LedController::bar(uint8_t position, uint16_t permille, uint8_t r, uint8_t g, uint8_t b) {
     if (position >= activeBoardProfile().holdCount) return false;
 
     const LedMapping* mapping = getMapping(position);
     if (!mapping) return false;
 
     PositionData& data = m_positions[position];
-    data.state = PositionState::FUSE;
+    data.state = PositionState::BAR;
     data.animationStep = 0;
     data.expansionRadius = 0;
     data.blinkOn = false;
-    data.fusePermille = (permille > FUSE_PERMILLE_MAX) ? FUSE_PERMILLE_MAX : permille;
-    // The bar is the SHOW color; kept as the core color like a gauge's, so a
-    // HOLD_GAUGE or SHOW_GAUGE afterwards starts from a known block.
-    setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+    data.barPermille = (permille > BAR_PERMILLE_MAX) ? BAR_PERMILLE_MAX : permille;
+    // The bar's color is its core color, like a gauge's: paintBar() draws in
+    // it, a snake crossing the hold repaints from it, and switching between
+    // the blue and the green bar recolors the whole block at once.
+    setCoreColor(position, r, g, b);
 
-    // Whatever the position showed before, paintFuse() covers the whole span
-    paintFuse(position);
+    // Whatever the position showed before, paintBar() covers the whole span
+    paintBar(position);
     m_needsUpdate = true;
     return true;
 }
 
-void LedController::paintFuse(uint8_t position) {
+void LedController::paintBar(uint8_t position) {
     const PositionData& data = m_positions[position];
     const uint8_t maxLevel = gaugeMaxLevel();
-    const uint32_t edge = fuseEdge(data.fusePermille, maxLevel);
+    const uint32_t edge = barEdge(data.barPermille, maxLevel);
 
     for (int16_t offset = -(int16_t)maxLevel; offset <= (int16_t)maxLevel; offset++) {
         const uint8_t distance = (uint8_t)((offset < 0) ? -offset : offset);
-        // Full LEDs in the SHOW color, the one at the end dimmed, the rest
+        // Full LEDs in the bar's color, the one at the end dimmed, the rest
         // dark; a mirror shows the same as its primary
-        const uint8_t fill = fuseFill(edge, distance);
+        const uint8_t fill = barFill(edge, distance);
         paintGaugeLed(position, offset,
-                      fuseChannel(COLOR_SHOW_R, fill),
-                      fuseChannel(COLOR_SHOW_G, fill),
-                      fuseChannel(COLOR_SHOW_B, fill));
+                      barChannel(data.coreR, fill),
+                      barChannel(data.coreG, fill),
+                      barChannel(data.coreB, fill));
     }
 }
 
@@ -619,7 +628,7 @@ uint8_t LedController::positionTrackSpans(uint8_t position, uint16_t lo[2], uint
         case PositionState::EXPANDED:
         case PositionState::CONTRACTING:
         case PositionState::GAUGE:
-        case PositionState::FUSE:
+        case PositionState::BAR:
             // A shrunken gauge covers less, but reporting the full block only
             // costs a repaint of LEDs that are already dark.
             reach += LED_SUCCESS_EXPANSION_RADIUS;
@@ -683,8 +692,8 @@ void LedController::repaintPosition(uint8_t position) {
             paintGauge(position, data.gaugeLevel);
             return;
 
-        case PositionState::FUSE:
-            paintFuse(position);
+        case PositionState::BAR:
+            paintBar(position);
             return;
 
         case PositionState::EXPANDED:

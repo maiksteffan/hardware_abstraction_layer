@@ -393,9 +393,10 @@ size_t buildBoardInfoLine(char* buffer, size_t size, bool withSelection) {
     // command family when its feature is listed here, so it can talk to older
     // firmware without probing. snake = TRACK / SNAKE / SNAKE_OFF,
     // holdgauge = HOLD_GAUGE, ledoffset = LED_OFFSET, sensitivity = GET_SENSITIVITY,
-    // sensordiag = SENSOR_DIAG, showgauge = SHOW_GAUGE, fuse = FUSE.
+    // sensordiag = SENSOR_DIAG, showgauge = SHOW_GAUGE, showbar = SHOW_BAR,
+    // holdbar = HOLD_BAR.
     length = appendTo(buffer, size, length,
-                      " features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge,fuse");
+                      " features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge,showbar,holdbar");
 
     if (withSelection) {
         const BoardProfile& profile = activeBoardProfile();
