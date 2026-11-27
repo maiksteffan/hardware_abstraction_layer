@@ -46,7 +46,7 @@ Current versions ([include/Config.h](include/Config.h)):
 
 | Constant | Value |
 |---|---|
-| `FIRMWARE_VERSION` | `1.6.2` |
+| `FIRMWARE_VERSION` | `1.7.0` |
 | `PROTOCOL_VERSION` | `3` (H01..H{holdCount} 3-char position tokens, per active board profile) |
 | `BOARD_TYPE` | `ESP32_S3_DEVKITC_1` (overridable per build env) |
 
@@ -325,6 +325,16 @@ when the hold time is over. `PositionState::GAUGE` is a static state — `SHOW`,
 `SUCCESS`, `FAIL`, `HIDE` and `HIDE_ALL` clear it like an expanded block, and
 the snake repaints over it as usual.
 
+`SHOW_GAUGE <pos> <percent>` (since 1.7.0) is the same gauge in the SHOW
+color: the next hold as a fuse that burns down while the Pi's time to grab it
+runs out (the timed game "Countdown-Jagd"; green stays "done"). Both commands
+share `LedController::gauge()` and the `GAUGE` state; the color is kept as the
+position's core color, which `paintGauge()` draws in and the snake's repaint
+restores. `paintGauge()` always draws the whole span, lit or dark, so
+`HOLD_GAUGE` on a blue fuse (or `SHOW_GAUGE` on a green gauge) recolors the
+whole block in one command — the Pi paints a grabbed hold green with
+`HOLD_GAUGE <pos> 100`. The firmware keeps no timer here either.
+
 ### LED offset (per-board correction)
 
 A profile says which LED lights a hold on every board of that build. On one
@@ -420,6 +430,7 @@ Manual smoke test in the monitor: `PING`, `INFO`, `SCAN`, `SHOW H05`,
 | `BLINK <pos> [#id]` / `STOP_BLINK <pos> [#id]` | `ACK` | Green blink on/off |
 | `EXPAND_STEP <pos> [#id]` / `CONTRACT_STEP <pos> [#id]` | `ACK` | Grow/shrink lit area by 1 LED per side |
 | `HOLD_GAUGE <pos> <0-100> [#id]` | `ACK` | Green block scaled to that share of its full width (hold-time gauge, see 2.6). Absolute; 0 leaves the center LED on. Out of range → `ERR invalid_level`, missing value → `ERR bad_format`. Firmware with `features=holdgauge` only |
+| `SHOW_GAUGE <pos> <0-100> [#id]` | `ACK` | Like `HOLD_GAUGE`, in the SHOW color: the next hold as a fuse burning down (see 2.6). Either gauge command on a gauge of the other color recolors the whole block. Same errors as `HOLD_GAUGE`. Firmware with `features=showgauge` only |
 | `LED_OFFSET <pos> <n> [#id]` | `ACK` | Move the hold's block `n` LEDs along the track, `-5..5`, sign optional (`-2`, `3`, `+3`); 0 = the profile's place (per-board correction, see 2.6). RAM only, cleared on boot. Missing or malformed value → `ERR bad_format`, beyond the bound → `ERR invalid_level` (both without id, like every parse error), block center off its strip → `ERR invalid_level #id`. Firmware with `features=ledoffset` only |
 | `INDICATE_RECORDING [#id]` | `ACK` | All holds static dim white |
 | `SUCCESS <pos> [#id]` | `ACK` → `DONE` | **Async**: green expansion animation |
@@ -459,7 +470,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | Command | Reply |
 |---|---|
 | `PING [#id]` | `ACK PING [#id]` |
-| `INFO [#id]` | `INFO firmware=1.6.2 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
+| `INFO [#id]` | `INFO firmware=1.7.0 protocol=3 board=ESP32_S3_DEVKITC_1 profiles=v1,v2,dev-5hold default=v1 features=snake,holdgauge,ledoffset,sensitivity,sensordiag,showgauge boardVersion=v1 holds=34 [#id]` (also emitted unsolicited at boot: once as a banner without `boardVersion`/`holds`, once resolved before `HARDWARE INITIALISED`) |
 | `BOARD_VERSION <slug>` | `ACK BOARD_VERSION <slug> holds=<n>` — **boot only**, see 2.4. Unknown slug → `ERR unknown_board_version <slug> [<available>]`; missing slug → `ERR bad_format` |
 | `SCAN [#id]` | `SCANNED [H01,H02,...] [#id]` — comma-separated, no spaces, only inputs whose parent sensor initialized |
 | `TRACK [#id]` | `ACK TRACK [#id]`, `TRACK length=<L1+L2> width=<ledPositionWidth>`, one `TRACK_HOLD <pos> <t>` per hold (`<t>,<t_mirror>` for a mirrored hold, primary first; with the hold's `LED_OFFSET` applied), `DONE TRACK [#id]`. Written straight to serial after draining the event queue (too long for one event, too many lines for the queue); touch events may interleave between lines |
@@ -479,7 +490,7 @@ queue is full the firmware answers `BUSY [#id]` and the Pi retries (3×).
 | `SENSITIVITY` | `SENSITIVITY <pos> <level> [#id]` — reply to `GET_SENSITIVITY` only |
 | `TOUCH_STATE` | `TOUCH_STATE <pos> active=<0/1> valid=<0/1> raw=<0/1> held=<0/1> used=<0/1> age_ms=<n> release_ms=<n> expect=<0/1> pending=<0/1> [#id]` — requested diagnostics only |
 | `SENSOR_DIAG` | `SENSOR_DIAG <pos> valid=1 chip=<hex> cs=<1-8> main=<hex> gen=<hex> stat=<hex> noise=<hex> delta=<n> base=<n> cal=<n> thr=<n> sens=<hex> cfg=<hex> cfg2=<hex> en=<hex> mt=<hex> recal=<hex> calact=<hex> [miss=<hex>,...] [#id]` — reply to `SENSOR_DIAG` only, after its `ACK`; keys of registers that did not answer are left out and listed in `miss`; `valid=0 chip=<hex> cs=<1-8>` when the chip answered none |
-| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0; `sensordiag` = SENSOR_DIAG, since 1.6.0) |
+| `INFO` | `INFO firmware=X protocol=Y board=Z profiles=<csv> default=<slug> features=<csv> [boardVersion=<slug> holds=<n>] [requested=<slug> mismatch=1] [#id]` — `features` lists optional command families (`snake` = TRACK/SNAKE/SNAKE_OFF, since 1.2.0; `holdgauge` = HOLD_GAUGE, since 1.3.0; `ledoffset` = LED_OFFSET, since 1.4.0; `sensitivity` = GET_SENSITIVITY, since 1.5.0; `sensordiag` = SENSOR_DIAG, since 1.6.0; `showgauge` = SHOW_GAUGE, since 1.7.0) |
 | `TRACK` / `TRACK_HOLD` | reply lines of `TRACK` only, between its `ACK` and `DONE` |
 | `HANDS_ON` / `HANDS_OFF` | occupancy transitions (no position) |
 | `SENSORS READY` / `SENSORS FAILED [...]` / `HARDWARE INITIALISED` | startup handshake only |
@@ -754,6 +765,7 @@ hardware_abstraction_layer/
 
 | Version | Change |
 |---|---|
+| 1.7.0 | Countdown fuse: new `SHOW_GAUGE <pos> <0-100>` draws the hold-time gauge in the SHOW color, so the Pi can show the next hold of a timed game as a fuse that burns down while the time to grab it runs out - green stays "done". Same geometry, errors and `GAUGE` state as `HOLD_GAUGE`; both go through `LedController::gauge()`, and the gauge keeps its color as the position's core color, which `paintGauge()` (before: always green) and the snake's repaint use. Switching a hold between the two colors repaints the whole block. `INFO` gains `features=showgauge`. Every existing command is unchanged. Not yet checked on a wall |
 | 1.6.2 | `SENSOR_DIAG` names a register the chip refuses instead of calling the chip silent. Its sixteen reads were one `&&` chain, so a single refused register made the whole reply `valid=0 chip=.. cs=..`, which the Pi shows as "the chip stopped answering". Seen on the `dev-5hold` wall: H04's chip (0x1F, a CT188-1 clone with the same product id as its neighbours) failed the diagnosis every time while `VALUE` read it fine. Each register is now read on its own and tried twice (`SENSOR_DIAG_READ_ATTEMPTS`); one that still fails leaves its key out and is listed by address in a trailing `miss=`, and `valid=0` is left for a chip that answers none. Additive: a Pi that does not know `miss` ignores it and reads what is there. Which register H04 refuses is not known yet - that is what this release reports |
 | 1.6.1 | Two cores on one I²C bus no longer read each other's registers. A register read was a pointer write with a stop, then a read; the Wire lock is held per transaction, so `VALUE`, `GET_SENSITIVITY`, `SET_SENSITIVITY` or `RECALIBRATE` on the command core could repoint a chip between the two halves of a poll read, and the poll between the halves of theirs. The poll then took a delta for the status byte of one sample (enough for a false touch, since a press counts at once) or for `MAIN_CONTROL`, which it wrote back with INT cleared - standby, deep sleep or another gain, holds dead until a recalibration or reboot; `VALUE` could answer with the status byte and `SET_SENSITIVITY` wipe the base shift. `readRegister()` now sends pointer and read as one transaction (repeated start), and INT is cleared by writing `CAP1188_MAIN_CONTROL_ACTIVE` instead of read-modify-write, which also saves one read per touched chip and poll and puts a chip with a changed gain right again. Only reachable while the Pi sends one of those commands, i.e. from the calibration screen and the sensitivity replay after boot, not during a game. Protocol unchanged. Found by reading the code; not observed on a wall, and the repeated-start read is untested on hardware - check `SCAN`, a touch and `SENSOR_DIAG` after flashing |
 | 1.6.0 | Diagnosis for a hold that stops registering touches until it is recalibrated: new `SENSOR_DIAG <pos>` replies `ACK`, then one line with the CAP1188 registers behind the position (noise flags, status, delta, base count, 10-bit calibration value, threshold, main control, general status, input enable, configuration 1/2, recalibration configuration, calibration-activate, multiple-touch configuration). Read on the polling core, once per request, without writing anything to the chip; `ERR sensor_inactive` for a sensor that failed init, `valid=0` for a chip that stops answering. The firmware interprets nothing - the Pi names what the values mean. `INFO` gains `features=sensordiag`. Every existing command is unchanged; the cause of the reported dead holds is not fixed by this release, only made visible |
