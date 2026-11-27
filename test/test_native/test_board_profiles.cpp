@@ -271,6 +271,20 @@ void test_info_announces_the_sensor_diagnosis() {
     TEST_ASSERT_NOT_NULL(strstr(infoValue(line, "features"), "sensordiag"));
 }
 
+void test_info_announces_the_show_gauge() {
+    // The Pi offers its timed game only on firmware that lists the feature:
+    // older firmware answers SHOW_GAUGE with an id-less ERR unknown_action and
+    // the next hold would stay dark. Matched as a whole entry, since
+    // "holdgauge" is listed too.
+    char line[EVENT_MESSAGE_BUFFER_SIZE];
+    for (int withSelection = 0; withSelection < 2; withSelection++) {
+        buildBoardInfoLine(line, sizeof(line), withSelection == 1);
+        char features[EVENT_MESSAGE_BUFFER_SIZE];
+        snprintf(features, sizeof(features), ",%s,", infoValue(line, "features"));
+        TEST_ASSERT_NOT_NULL(strstr(features, ",showgauge,"));
+    }
+}
+
 void test_the_line_fits_the_event_buffer() {
     selectBoardProfile("nope");  // longest variant: adds requested= and mismatch=
     char buffer[EVENT_MESSAGE_BUFFER_SIZE];
@@ -331,6 +345,7 @@ int main() {
     RUN_TEST(test_the_resolved_line_reports_a_mismatch);
     RUN_TEST(test_info_announces_that_sensitivity_can_be_read);
     RUN_TEST(test_info_announces_the_sensor_diagnosis);
+    RUN_TEST(test_info_announces_the_show_gauge);
     RUN_TEST(test_the_line_fits_the_event_buffer);
     RUN_TEST(test_a_short_buffer_truncates_instead_of_overflowing);
     RUN_TEST(test_a_zero_length_buffer_writes_nothing);

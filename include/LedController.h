@@ -40,12 +40,14 @@ struct PositionData {
     uint32_t lastAnimationTime;
     bool blinkOn;
     uint8_t expansionRadius;  // Current expansion radius for EXPAND_STEP/CONTRACT_STEP
-    // GAUGE only: how far out the green block still reaches, in physical LEDs
-    // from the center (0 = just the center LED). See holdGauge().
+    // GAUGE only: how far out the block still reaches, in physical LEDs from
+    // the center (0 = just the center LED). See holdGauge() / showGauge().
     uint8_t gaugeLevel;
     // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
     // a red core and a finished CONTRACT a green one, and repaintPosition()
     // has to restore the right one after the snake passed over it.
+    // For GAUGE it is the color of the whole block - green for HOLD_GAUGE,
+    // the SHOW color for SHOW_GAUGE - and paintGauge() draws in it.
     uint8_t coreR, coreG, coreB;
 };
 
@@ -76,6 +78,9 @@ public:
     // lost command is corrected by the next one. 100 = the full SUCCESS block,
     // 0 = the center LED alone (the hold never goes dark while it is active).
     bool holdGauge(uint8_t position, uint8_t percent);
+    // The same gauge in the SHOW color: the next hold as a fuse that burns
+    // down while the Pi's time to grab it runs out. Green stays "done".
+    bool showGauge(uint8_t position, uint8_t percent);
     
     // Sequence animation
     void startSequenceCompletedAnimation();
@@ -177,7 +182,13 @@ private:
     // the center. Unlike paint(), this addresses LEDs inside the core too,
     // which the gauge needs to shrink below the core's width.
     void paintGaugeLed(uint8_t position, int16_t offset, uint8_t r, uint8_t g, uint8_t b);
+    // Draw the whole gauge span, lit up to <level> in the position's core
+    // color and dark beyond it, so a new color or a smaller level leaves
+    // nothing of the previous one behind.
     void paintGauge(uint8_t position, uint8_t level);
+    // HOLD_GAUGE and SHOW_GAUGE: the same state and geometry, only the color
+    // differs.
+    bool gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t g, uint8_t b);
     // Repaint a position from its state alone (static states; a running
     // expansion is drawn at its current step). Used to restore what the
     // snake covered.

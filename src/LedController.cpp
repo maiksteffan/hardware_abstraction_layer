@@ -372,11 +372,12 @@ void LedController::paintGaugeLed(uint8_t position, int16_t offset, uint8_t r, u
 }
 
 void LedController::paintGauge(uint8_t position, uint8_t level) {
+    const PositionData& data = m_positions[position];
     const uint8_t maxLevel = gaugeMaxLevel();
     for (int16_t offset = -(int16_t)maxLevel; offset <= (int16_t)maxLevel; offset++) {
         const int16_t distance = (offset < 0) ? -offset : offset;
         if (distance <= (int16_t)level) {
-            paintGaugeLed(position, offset, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+            paintGaugeLed(position, offset, data.coreR, data.coreG, data.coreB);
         } else {
             paintGaugeLed(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
         }
@@ -384,6 +385,14 @@ void LedController::paintGauge(uint8_t position, uint8_t level) {
 }
 
 bool LedController::holdGauge(uint8_t position, uint8_t percent) {
+    return gauge(position, percent, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+}
+
+bool LedController::showGauge(uint8_t position, uint8_t percent) {
+    return gauge(position, percent, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+}
+
+bool LedController::gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t g, uint8_t b) {
     if (position >= activeBoardProfile().holdCount) return false;
 
     const LedMapping* mapping = getMapping(position);
@@ -397,9 +406,12 @@ bool LedController::holdGauge(uint8_t position, uint8_t percent) {
     m_positions[position].expansionRadius = 0;
     m_positions[position].blinkOn = false;
     m_positions[position].gaugeLevel = level;
-    // A snake crossing the hold repaints from the core color, and a gauge is
-    // green whatever the position showed before it.
-    setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
+    // The gauge's color is its core color: paintGauge() draws in it, and a
+    // snake crossing the hold repaints from it. Whatever the position showed
+    // before - another gauge color included - paintGauge() covers the whole
+    // span, so switching between HOLD_GAUGE and SHOW_GAUGE recolors every
+    // lit LED at once.
+    setCoreColor(position, r, g, b);
 
     paintGauge(position, level);
     m_needsUpdate = true;
@@ -617,6 +629,7 @@ void LedController::repaintPosition(uint8_t position) {
 
         case PositionState::GAUGE:
             // Drawn per LED, not per ring: a gauge shrinks inside the core too.
+            // In its own color (green or SHOW), kept as the core color.
             paintGauge(position, data.gaugeLevel);
             return;
 

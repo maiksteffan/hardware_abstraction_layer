@@ -17,6 +17,10 @@
  *   HOLD_GAUGE <pos> <0-100> [#id] - Green block scaled to that share of its full
  *                                   width, as a hold-time gauge (100 = full SUCCESS
  *                                   block, 0 = center LED only). Absolute value
+ *   SHOW_GAUGE <pos> <0-100> [#id] - The same gauge in the SHOW color: the next hold
+ *                                   as a fuse burning down while the time to grab it
+ *                                   runs out. HOLD_GAUGE / SHOW_GAUGE on a gauge of the
+ *                                   other color recolor the whole block
  *   LED_OFFSET <pos> <n> [#id]    - Move the position's block n LEDs along the track
  *                                   (-LED_OFFSET_MAX..LED_OFFSET_MAX, 0 = the profile's
  *                                   place). This board's own correction, sent by the Pi
@@ -84,6 +88,7 @@ enum class CommandAction : uint8_t {
     EXPAND_STEP,
     CONTRACT_STEP,
     HOLD_GAUGE,
+    SHOW_GAUGE,
     LED_OFFSET,
     MENUE_CHANGE,
     EXPECT,
@@ -122,7 +127,7 @@ struct ParsedCommand {
     uint8_t positionIndex;                  // 0..holdCount-1 (255 = invalid)
     bool hasId;
     uint32_t id;
-    uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE percent)
+    uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE / SHOW_GAUGE percent)
     int8_t ledOffset;    // LED_OFFSET: LEDs along the track, -LED_OFFSET_MAX..LED_OFFSET_MAX
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE

@@ -264,13 +264,15 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     }
     
     // Parse extra numeric value if needed (sensitivity level, gauge percent)
-    if (cmd.action == CommandAction::SET_SENSITIVITY || cmd.action == CommandAction::HOLD_GAUGE) {
+    const bool gaugePercent = (cmd.action == CommandAction::HOLD_GAUGE ||
+                               cmd.action == CommandAction::SHOW_GAUGE);
+    if (cmd.action == CommandAction::SET_SENSITIVITY || gaugePercent) {
         if (*p == '\0' || *p == '#') {
             m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
             return false;
         }
-        
-        const uint8_t maxValue = (cmd.action == CommandAction::HOLD_GAUGE) ? 100 : 7;
+
+        const uint8_t maxValue = gaugePercent ? 100 : 7;
         uint16_t val = 0;
         while (*p >= '0' && *p <= '9') {
             val = val * 10 + (uint16_t)(*p - '0');
@@ -341,6 +343,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "HOLD_GAUGE", len)) return CommandAction::HOLD_GAUGE;
+    if (strcasecmpN(str, "SHOW_GAUGE", len)) return CommandAction::SHOW_GAUGE;
     if (strcasecmpN(str, "LED_OFFSET", len)) return CommandAction::LED_OFFSET;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
     if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
@@ -382,6 +385,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::EXPAND_STEP: return "EXPAND_STEP";
         case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
         case CommandAction::HOLD_GAUGE: return "HOLD_GAUGE";
+        case CommandAction::SHOW_GAUGE: return "SHOW_GAUGE";
         case CommandAction::LED_OFFSET: return "LED_OFFSET";
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
@@ -423,6 +427,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::EXPAND_STEP:
         case CommandAction::CONTRACT_STEP:
         case CommandAction::HOLD_GAUGE:
+        case CommandAction::SHOW_GAUGE:
         case CommandAction::LED_OFFSET:
         case CommandAction::EXPECT:
         case CommandAction::EXPECT_RELEASE:
@@ -544,7 +549,15 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
                 m_eventQueue.queueError("command_failed", cmdId);
             }
             break;
-            
+
+        case CommandAction::SHOW_GAUGE:
+            if (m_ledController.showGauge(cmd.positionIndex, cmd.extraValue)) {
+                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+            } else {
+                m_eventQueue.queueError("command_failed", cmdId);
+            }
+            break;
+
         case CommandAction::LED_OFFSET:
             // The range was checked while parsing; what can still fail here is
             // an offset that would push the block's center off its strip.
