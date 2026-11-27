@@ -21,6 +21,9 @@
  *                                   as a fuse burning down while the time to grab it
  *                                   runs out. HOLD_GAUGE / SHOW_GAUGE on a gauge of the
  *                                   other color recolor the whole block
+ *   FUSE <pos> <0-1000> [#id]     - The next hold as a burning fuse: the SHOW_GAUGE block,
+ *                                   but per mille, shrinking without steps and with a
+ *                                   flickering spark at its burning end. Absolute value
  *   LED_OFFSET <pos> <n> [#id]    - Move the position's block n LEDs along the track
  *                                   (-LED_OFFSET_MAX..LED_OFFSET_MAX, 0 = the profile's
  *                                   place). This board's own correction, sent by the Pi
@@ -89,6 +92,7 @@ enum class CommandAction : uint8_t {
     CONTRACT_STEP,
     HOLD_GAUGE,
     SHOW_GAUGE,
+    FUSE,
     LED_OFFSET,
     MENUE_CHANGE,
     EXPECT,
@@ -129,6 +133,7 @@ struct ParsedCommand {
     uint32_t id;
     uint8_t extraValue;  // For commands that need an extra numeric parameter (sensitivity level, HOLD_GAUGE / SHOW_GAUGE percent)
     int8_t ledOffset;    // LED_OFFSET: LEDs along the track, -LED_OFFSET_MAX..LED_OFFSET_MAX
+    uint16_t permille;   // FUSE: time left, 0..FUSE_PERMILLE_MAX
     uint8_t r, g, b;     // RGB color for MENUE_CHANGE
     uint8_t range;       // Range for MENUE_CHANGE
     int32_t snakeStart;  // SNAKE: first track index (may be negative; clamped)

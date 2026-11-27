@@ -31,7 +31,8 @@ enum class PositionState : uint8_t {
     EXPANDED,
     CONTRACTING,
     BLINKING,
-    GAUGE
+    GAUGE,
+    FUSE
 };
 
 struct PositionData {
@@ -43,6 +44,8 @@ struct PositionData {
     // GAUGE only: how far out the block still reaches, in physical LEDs from
     // the center (0 = just the center LED). See holdGauge() / showGauge().
     uint8_t gaugeLevel;
+    // FUSE only: the time left, 0-1000 per mille (see FuseGauge.h)
+    uint16_t fusePermille;
     // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
     // a red core and a finished CONTRACT a green one, and repaintPosition()
     // has to restore the right one after the snake passed over it.
@@ -81,6 +84,12 @@ public:
     // The same gauge in the SHOW color: the next hold as a fuse that burns
     // down while the Pi's time to grab it runs out. Green stays "done".
     bool showGauge(uint8_t position, uint8_t percent);
+    // The next hold as a burning fuse: the same block in the SHOW color, but
+    // shrinking without steps and with a flickering spark at its burning end
+    // (FuseGauge.h). <permille> is the time left, absolute like the gauges;
+    // 0 is the center LED alone, as a glowing spark. The firmware keeps no
+    // timer - only the spark's flicker runs on its own.
+    bool fuse(uint8_t position, uint16_t permille);
     
     // Sequence animation
     void startSequenceCompletedAnimation();
@@ -156,6 +165,9 @@ private:
     // LED_OFFSET corrections, applied in ledIndex()
     LedOffsets m_ledOffsets;
 
+    // State of the spark's flicker (fuseFlicker in FuseGauge.h), never 0
+    uint32_t m_fuseNoise;
+
     void update(uint32_t nowMillis);
     const LedMapping* getMapping(uint8_t position) const;
     const LedMirror* getMirror(uint8_t position) const;
@@ -189,6 +201,9 @@ private:
     // HOLD_GAUGE and SHOW_GAUGE: the same state and geometry, only the color
     // differs.
     bool gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t g, uint8_t b);
+    // Draw the whole fuse span from the position's permille, every LED with a
+    // new flicker of the spark, dark beyond the burning end.
+    void paintFuse(uint8_t position);
     // Repaint a position from its state alone (static states; a running
     // expansion is drawn at its current step). Used to restore what the
     // snake covered.

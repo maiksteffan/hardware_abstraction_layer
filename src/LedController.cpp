@@ -8,6 +8,7 @@
  */
 
 #include "LedController.h"
+#include "FuseGauge.h"
 #include "HoldGauge.h"
 #include "SnakeTrack.h"
 
@@ -40,6 +41,7 @@ LedController::LedController()
     , m_snakeR(0)
     , m_snakeG(0)
     , m_snakeB(0)
+    , m_fuseNoise(0x2545F491u)
 {
 }
 
@@ -72,6 +74,7 @@ void LedController::begin() {
         m_positions[i].blinkOn = false;
         m_positions[i].expansionRadius = 0;
         m_positions[i].gaugeLevel = 0;
+        m_positions[i].fusePermille = 0;
         setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     }
     // Offsets belong to the board the Pi describes after connecting, never to
@@ -96,6 +99,12 @@ void LedController::update(uint32_t nowMillis) {
             updateAnimation(i, nowMillis);
         } else if (m_positions[i].state == PositionState::CONTRACTING) {
             updateContractAnimation(i, nowMillis);
+        } else if (m_positions[i].state == PositionState::FUSE &&
+                   nowMillis - m_positions[i].lastAnimationTime >= LED_FUSE_FLICKER_MS) {
+            // The spark flickers on while the Pi has not sent a new time
+            paintFuse(i);
+            m_positions[i].lastAnimationTime = nowMillis;
+            m_needsUpdate = true;
         }
     }
     
@@ -133,6 +142,7 @@ bool LedController::show(uint8_t position) {
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
         m_positions[position].state == PositionState::GAUGE ||
+        m_positions[position].state == PositionState::FUSE ||
         m_positions[position].expansionRadius > 0) {
         clearExpandedRegion(position, mapping);
     }
@@ -197,7 +207,8 @@ bool LedController::success(uint8_t position) {
     // If this position was already animating/expanded, clear its old region first
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
-        m_positions[position].state == PositionState::GAUGE) {
+        m_positions[position].state == PositionState::GAUGE ||
+        m_positions[position].state == PositionState::FUSE) {
         clearExpandedRegion(position, mapping);
     } else if (m_positions[position].state == PositionState::SHOWN ||
                m_positions[position].state == PositionState::BLINKING) {
@@ -224,7 +235,8 @@ bool LedController::fail(uint8_t position) {
     
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
-        m_positions[position].state == PositionState::GAUGE) {
+        m_positions[position].state == PositionState::GAUGE ||
+        m_positions[position].state == PositionState::FUSE) {
         clearExpandedRegion(position, mapping);
     }
     
@@ -423,6 +435,52 @@ bool LedController::gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t 
     return true;
 }
 
+bool LedController::fuse(uint8_t position, uint16_t permille) {
+    if (position >= activeBoardProfile().holdCount) return false;
+
+    const LedMapping* mapping = getMapping(position);
+    if (!mapping) return false;
+
+    PositionData& data = m_positions[position];
+    data.state = PositionState::FUSE;
+    data.animationStep = 0;
+    data.expansionRadius = 0;
+    data.blinkOn = false;
+    data.fusePermille = (permille > FUSE_PERMILLE_MAX) ? FUSE_PERMILLE_MAX : permille;
+    // The fuse is the SHOW color; kept as the core color like a gauge's, so a
+    // HOLD_GAUGE or SHOW_GAUGE afterwards starts from a known block.
+    setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
+
+    // Whatever the position showed before, paintFuse() covers the whole span
+    paintFuse(position);
+    data.lastAnimationTime = millis();
+    m_needsUpdate = true;
+    return true;
+}
+
+void LedController::paintFuse(uint8_t position) {
+    const PositionData& data = m_positions[position];
+    const uint8_t maxLevel = gaugeMaxLevel();
+    const uint32_t edge = fuseEdge(data.fusePermille, maxLevel);
+
+    for (int16_t offset = -(int16_t)maxLevel; offset <= (int16_t)maxLevel; offset++) {
+        const uint8_t distance = (uint8_t)((offset < 0) ? -offset : offset);
+        const uint8_t fill = fuseFill(edge, distance);
+        if (fill == 0) {
+            paintGaugeLed(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
+            continue;
+        }
+        // Each LED flickers on its own, so the spark sparkles instead of
+        // pulsing as one; a mirror shows the same as its primary.
+        const uint8_t spark = fuseSpark(edge, distance);
+        const uint8_t flicker = spark ? fuseFlicker(m_fuseNoise, LED_FUSE_FLICKER_MIN) : 255;
+        paintGaugeLed(position, offset,
+                      fuseChannel(COLOR_SHOW_R, COLOR_FUSE_SPARK_R, spark, flicker, fill),
+                      fuseChannel(COLOR_SHOW_G, COLOR_FUSE_SPARK_G, spark, flicker, fill),
+                      fuseChannel(COLOR_SHOW_B, COLOR_FUSE_SPARK_B, spark, flicker, fill));
+    }
+}
+
 void LedController::startSequenceCompletedAnimation() {
     m_sequenceAnimActive = true;
     m_sequenceAnimStep = 0;
@@ -575,6 +633,7 @@ uint8_t LedController::positionTrackSpans(uint8_t position, uint16_t lo[2], uint
         case PositionState::EXPANDED:
         case PositionState::CONTRACTING:
         case PositionState::GAUGE:
+        case PositionState::FUSE:
             // A shrunken gauge covers less, but reporting the full block only
             // costs a repaint of LEDs that are already dark.
             reach += LED_SUCCESS_EXPANSION_RADIUS;
@@ -636,6 +695,10 @@ void LedController::repaintPosition(uint8_t position) {
             // Drawn per LED, not per ring: a gauge shrinks inside the core too.
             // In its own color (green or SHOW), kept as the core color.
             paintGauge(position, data.gaugeLevel);
+            return;
+
+        case PositionState::FUSE:
+            paintFuse(position);
             return;
 
         case PositionState::EXPANDED:

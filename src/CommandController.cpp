@@ -11,6 +11,7 @@
 #include "TouchController.h"
 #include "EventQueue.h"
 #include "SnakeTrack.h"
+#include "FuseGauge.h"
 
 // ============================================================================
 // Constructor
@@ -142,6 +143,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.id = COMMAND_ID_NONE;
     cmd.extraValue = 0;
     cmd.ledOffset = 0;
+    cmd.permille = 0;
     cmd.r = 0;
     cmd.g = 0;
     cmd.b = 0;
@@ -289,6 +291,30 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
         p = skipWhitespace(p);
     }
     
+    // Parse the time left of FUSE, per mille. Like a gauge's percent: missing
+    // is bad_format, beyond 1000 invalid_level.
+    if (cmd.action == CommandAction::FUSE) {
+        if (*p < '0' || *p > '9') {
+            m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
+            return false;
+        }
+
+        uint32_t val = 0;
+        while (*p >= '0' && *p <= '9') {
+            val = val * 10 + (uint32_t)(*p - '0');
+            if (val > 9999) val = 9999;  // saturate instead of wrapping into range
+            p++;
+        }
+
+        if (val > FUSE_PERMILLE_MAX) {
+            m_eventQueue.queueError("invalid_level", COMMAND_ID_NONE);
+            return false;
+        }
+
+        cmd.permille = (uint16_t)val;
+        p = skipWhitespace(p);
+    }
+
     // Parse the signed offset of LED_OFFSET. A missing or malformed number is
     // bad_format; a well-formed one beyond the bound is invalid_level, like an
     // out-of-range sensitivity.
@@ -344,6 +370,7 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "HOLD_GAUGE", len)) return CommandAction::HOLD_GAUGE;
     if (strcasecmpN(str, "SHOW_GAUGE", len)) return CommandAction::SHOW_GAUGE;
+    if (strcasecmpN(str, "FUSE", len)) return CommandAction::FUSE;
     if (strcasecmpN(str, "LED_OFFSET", len)) return CommandAction::LED_OFFSET;
     if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
     if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
@@ -386,6 +413,7 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
         case CommandAction::HOLD_GAUGE: return "HOLD_GAUGE";
         case CommandAction::SHOW_GAUGE: return "SHOW_GAUGE";
+        case CommandAction::FUSE: return "FUSE";
         case CommandAction::LED_OFFSET: return "LED_OFFSET";
         case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
@@ -428,6 +456,7 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::CONTRACT_STEP:
         case CommandAction::HOLD_GAUGE:
         case CommandAction::SHOW_GAUGE:
+        case CommandAction::FUSE:
         case CommandAction::LED_OFFSET:
         case CommandAction::EXPECT:
         case CommandAction::EXPECT_RELEASE:
@@ -552,6 +581,14 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
 
         case CommandAction::SHOW_GAUGE:
             if (m_ledController.showGauge(cmd.positionIndex, cmd.extraValue)) {
+                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
+            } else {
+                m_eventQueue.queueError("command_failed", cmdId);
+            }
+            break;
+
+        case CommandAction::FUSE:
+            if (m_ledController.fuse(cmd.positionIndex, cmd.permille)) {
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
             } else {
                 m_eventQueue.queueError("command_failed", cmdId);

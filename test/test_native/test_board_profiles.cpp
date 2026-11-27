@@ -285,6 +285,19 @@ void test_info_announces_the_show_gauge() {
     }
 }
 
+void test_info_announces_the_fuse() {
+    // The Pi draws Fuse's next hold with FUSE only on firmware that lists it;
+    // older firmware answers FUSE with an id-less ERR unknown_action and the
+    // Pi stays with SHOW_GAUGE.
+    char line[EVENT_MESSAGE_BUFFER_SIZE];
+    for (int withSelection = 0; withSelection < 2; withSelection++) {
+        buildBoardInfoLine(line, sizeof(line), withSelection == 1);
+        char features[EVENT_MESSAGE_BUFFER_SIZE];
+        snprintf(features, sizeof(features), ",%s,", infoValue(line, "features"));
+        TEST_ASSERT_NOT_NULL(strstr(features, ",fuse,"));
+    }
+}
+
 void test_the_line_fits_the_event_buffer() {
     selectBoardProfile("nope");  // longest variant: adds requested= and mismatch=
     char buffer[EVENT_MESSAGE_BUFFER_SIZE];
@@ -319,6 +332,7 @@ void test_a_zero_length_buffer_writes_nothing() {
 // is the one that includes BoardProfiles.cpp.
 void runSnakeTrackTests();
 void runHoldGaugeTests();
+void runFuseGaugeTests();
 void runLedOffsetTests();
 
 int main() {
@@ -346,12 +360,14 @@ int main() {
     RUN_TEST(test_info_announces_that_sensitivity_can_be_read);
     RUN_TEST(test_info_announces_the_sensor_diagnosis);
     RUN_TEST(test_info_announces_the_show_gauge);
+    RUN_TEST(test_info_announces_the_fuse);
     RUN_TEST(test_the_line_fits_the_event_buffer);
     RUN_TEST(test_a_short_buffer_truncates_instead_of_overflowing);
     RUN_TEST(test_a_zero_length_buffer_writes_nothing);
 
     runSnakeTrackTests();
     runHoldGaugeTests();
+    runFuseGaugeTests();
     runLedOffsetTests();
 
     return UNITY_END();
