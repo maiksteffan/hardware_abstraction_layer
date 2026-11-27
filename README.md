@@ -49,7 +49,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
 - **Touch intelligence:** asymmetric debouncing, one-shot expectations,
   single-consumption press edges (a held hold can't satisfy two EXPECTs),
   brush-by rejection for recording mode, hands-off/presence events.
-  Fresh grabs are tracked even between `EXPECT_ANY` commands, so releasing
+  Fresh grabs are tracked even between `EXPECT_ANY_EXCEPT` commands, so releasing
   one hold and grabbing the next before the Pi re-arms does not lose the
   next touch. Unconsumed grabs recover from brief sensor dropouts without
   requiring a full release. The release latch remains 500 ms; it does not
@@ -62,7 +62,7 @@ the firmware reports `TOUCHED`/`HANDS_OFF` events back.
   Polling-core event submissions never wait for the queue mutex. Failed I2C
   status reads pause release evidence instead of restarting the whole latch;
   periodic errors therefore cannot keep an otherwise released hold consumed
-  forever. Recording delta reads are skipped when no `EXPECT_ANY` is armed.
+  forever. Recording delta reads are skipped when no `EXPECT_ANY_EXCEPT` is armed.
 - **LED engine:** hold→strip mapping with mirrors, solid states and
   non-blocking animations (success pulse, victory/defeat, recording glow).
 - **Snake overlay:** both strips chained into one track; `TRACK` reports its

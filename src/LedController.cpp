@@ -28,13 +28,6 @@ LedController::LedController()
     , m_defeatAnimActive(false)
     , m_defeatAnimStep(0)
     , m_defeatAnimLastTime(0)
-    , m_menuChangeActive(false)
-    , m_menuChangeStep(0)
-    , m_menuChangeRange(0)
-    , m_menuChangeR(0)
-    , m_menuChangeG(0)
-    , m_menuChangeB(0)
-    , m_menuChangeLastTime(0)
     , m_snakeActive(false)
     , m_snakeStart(0)
     , m_snakeEnd(0)
@@ -71,7 +64,6 @@ void LedController::begin() {
         m_positions[i].animationStep = 0;
         m_positions[i].lastAnimationTime = 0;
         m_positions[i].blinkOn = false;
-        m_positions[i].expansionRadius = 0;
         m_positions[i].gaugeLevel = 0;
         m_positions[i].barPermille = 0;
         setCoreColor(i, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
@@ -82,7 +74,6 @@ void LedController::begin() {
     
     m_sequenceAnimActive = false;
     m_defeatAnimActive = false;
-    m_menuChangeActive = false;
     m_snakeActive = false;
     m_needsUpdate = false;
 }
@@ -96,8 +87,6 @@ void LedController::update(uint32_t nowMillis) {
     for (uint8_t i = 0; i < activeBoardProfile().holdCount; i++) {
         if (m_positions[i].state == PositionState::ANIMATING) {
             updateAnimation(i, nowMillis);
-        } else if (m_positions[i].state == PositionState::CONTRACTING) {
-            updateContractAnimation(i, nowMillis);
         }
     }
     
@@ -109,10 +98,6 @@ void LedController::update(uint32_t nowMillis) {
     
     if (m_defeatAnimActive) {
         updateDefeatAnimation(nowMillis);
-    }
-    
-    if (m_menuChangeActive) {
-        updateMenuChangeAnimation(nowMillis);
     }
     
     if (m_needsUpdate) {
@@ -135,14 +120,12 @@ bool LedController::show(uint8_t position) {
     if (m_positions[position].state == PositionState::ANIMATING ||
         m_positions[position].state == PositionState::EXPANDED ||
         m_positions[position].state == PositionState::GAUGE ||
-        m_positions[position].state == PositionState::BAR ||
-        m_positions[position].expansionRadius > 0) {
+        m_positions[position].state == PositionState::BAR) {
         clearExpandedRegion(position, mapping);
     }
     
     m_positions[position].state = PositionState::SHOWN;
     m_positions[position].animationStep = 0;
-    m_positions[position].expansionRadius = 0;
     m_positions[position].gaugeLevel = 0;
     setCoreColor(position, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
     
@@ -163,7 +146,6 @@ bool LedController::hide(uint8_t position) {
     m_positions[position].state = PositionState::OFF;
     m_positions[position].animationStep = 0;
     m_positions[position].blinkOn = false;
-    m_positions[position].expansionRadius = 0;
     
     m_needsUpdate = true;
     return true;
@@ -177,7 +159,6 @@ void LedController::hideAll() {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
-        m_positions[i].expansionRadius = 0;
     }
     // Every full-board animation ends here; its queued command reports DONE on
     // the next tick. A defeat left running repainted the whole board red every
@@ -185,7 +166,6 @@ void LedController::hideAll() {
     // HIDE_ALL - a game restarted during the pulses stayed dark.
     m_sequenceAnimActive = false;
     m_defeatAnimActive = false;
-    m_menuChangeActive = false;
     // The strips are already blank, so there is nothing to restore under it.
     m_snakeActive = false;
     m_needsUpdate = true;
@@ -244,30 +224,6 @@ bool LedController::fail(uint8_t position) {
     return true;
 }
 
-bool LedController::contract(uint8_t position) {
-    if (position >= activeBoardProfile().holdCount) return false;
-    
-    const LedMapping* mapping = getMapping(position);
-    if (!mapping) return false;
-    
-    // Only contract if expanded or animating (expanding)
-    if (m_positions[position].state == PositionState::EXPANDED ||
-        m_positions[position].state == PositionState::ANIMATING) {
-        // Start from full expansion radius
-        m_positions[position].state = PositionState::CONTRACTING;
-        m_positions[position].animationStep = LED_SUCCESS_EXPANSION_RADIUS;
-        m_positions[position].lastAnimationTime = millis();
-    } else {
-        // If not expanded, just ensure it's shown as a single green LED
-        m_positions[position].state = PositionState::SHOWN;
-        setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-        paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-    }
-    
-    m_needsUpdate = true;
-    return true;
-}
-
 bool LedController::blink(uint8_t position) {
     if (position >= activeBoardProfile().holdCount) return false;
     
@@ -305,64 +261,6 @@ bool LedController::stopBlink(uint8_t position) {
     m_positions[position].state = PositionState::OFF;
     m_positions[position].animationStep = 0;
     m_positions[position].blinkOn = false;
-    
-    m_needsUpdate = true;
-    return true;
-}
-
-bool LedController::expandStep(uint8_t position) {
-    if (position >= activeBoardProfile().holdCount) return false;
-    
-    const LedMapping* mapping = getMapping(position);
-    if (!mapping) return false;
-    
-    // Get current expansion radius
-    uint8_t currentRadius = m_positions[position].expansionRadius;
-    uint8_t newRadius = currentRadius + 1;
-    
-    // Limit expansion to reasonable bounds
-    if (newRadius > LED_SUCCESS_EXPANSION_RADIUS) {
-        return true;  // Already at max, but not an error
-    }
-    
-    // Light up the new outer LEDs (left and right of center)
-    // Set new outer LEDs to blue (same as SHOW color)
-    paint(position, -(int16_t)newRadius, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
-    paint(position, (int16_t)newRadius, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
-    
-    // Update state
-    m_positions[position].expansionRadius = newRadius;
-    m_positions[position].state = PositionState::SHOWN;
-    
-    m_needsUpdate = true;
-    return true;
-}
-
-bool LedController::contractStep(uint8_t position) {
-    if (position >= activeBoardProfile().holdCount) return false;
-    
-    const LedMapping* mapping = getMapping(position);
-    if (!mapping) return false;
-    
-    // Get current expansion radius
-    uint8_t currentRadius = m_positions[position].expansionRadius;
-    
-    // If already at center (radius 0), nothing to contract
-    if (currentRadius == 0) {
-        return true;  // Not an error, just nothing to do
-    }
-    
-    // Turn off the outer LEDs (left and right at current radius)
-    paint(position, -(int16_t)currentRadius, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-    paint(position, (int16_t)currentRadius, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-    
-    // Decrease radius
-    m_positions[position].expansionRadius = currentRadius - 1;
-    
-    // If fully contracted, update state
-    if (m_positions[position].expansionRadius == 0) {
-        // Center LED remains on, state stays SHOWN
-    }
     
     m_needsUpdate = true;
     return true;
@@ -413,7 +311,6 @@ bool LedController::gauge(uint8_t position, uint8_t percent, uint8_t r, uint8_t 
 
     m_positions[position].state = PositionState::GAUGE;
     m_positions[position].animationStep = 0;
-    m_positions[position].expansionRadius = 0;
     m_positions[position].blinkOn = false;
     m_positions[position].gaugeLevel = level;
     // The gauge's color is its core color: paintGauge() draws in it, and a
@@ -445,7 +342,6 @@ bool LedController::bar(uint8_t position, uint16_t permille, uint8_t r, uint8_t 
     PositionData& data = m_positions[position];
     data.state = PositionState::BAR;
     data.animationStep = 0;
-    data.expansionRadius = 0;
     data.blinkOn = false;
     data.barPermille = (permille > BAR_PERMILLE_MAX) ? BAR_PERMILLE_MAX : permille;
     // The bar's color is its core color, like a gauge's: paintBar() draws in
@@ -504,31 +400,11 @@ bool LedController::isDefeatAnimationComplete() const {
     return !m_defeatAnimActive;
 }
 
-void LedController::startMenuChangeAnimation(uint8_t r, uint8_t g, uint8_t b, uint8_t range) {
-    m_menuChangeActive = true;
-    m_menuChangeStep = 0;
-    m_menuChangeRange = range;
-    m_menuChangeR = r;
-    m_menuChangeG = g;
-    m_menuChangeB = b;
-    m_menuChangeLastTime = millis();
-    
-    // Clear both strips
-    m_strip1.clear();
-    m_strip2.clear();
-    m_needsUpdate = true;
-}
-
-bool LedController::isMenuChangeAnimationComplete() const {
-    return !m_menuChangeActive;
-}
-
 void LedController::indicateRecording() {
     // Light every mapped position in static dim white. Stays lit until a
     // subsequent command (e.g. HIDE_ALL) clears the strips.
     m_sequenceAnimActive = false;
     m_defeatAnimActive = false;
-    m_menuChangeActive = false;
 
     m_strip1.clear();
     m_strip2.clear();
@@ -536,7 +412,6 @@ void LedController::indicateRecording() {
         m_positions[i].state = PositionState::OFF;
         m_positions[i].animationStep = 0;
         m_positions[i].blinkOn = false;
-        m_positions[i].expansionRadius = 0;
 
         const LedMapping* mapping = getMapping(i);
         if (mapping) {
@@ -621,12 +496,8 @@ uint8_t LedController::positionTrackSpans(uint8_t position, uint16_t lo[2], uint
     // Widest the position can currently reach: its core plus any ring.
     int32_t reach = (activeBoardProfile().ledPositionWidth - 1) / 2;
     switch (data.state) {
-        case PositionState::SHOWN:
-            reach += data.expansionRadius;
-            break;
         case PositionState::ANIMATING:
         case PositionState::EXPANDED:
-        case PositionState::CONTRACTING:
         case PositionState::GAUGE:
         case PositionState::BAR:
             // A shrunken gauge covers less, but reporting the full block only
@@ -675,11 +546,6 @@ void LedController::repaintPosition(uint8_t position) {
 
         case PositionState::SHOWN:
             paint(position, 0, data.coreR, data.coreG, data.coreB);
-            // EXPAND_STEP rings are in the SHOW color whatever the core is.
-            for (uint8_t r = 1; r <= data.expansionRadius; r++) {
-                paint(position, -(int16_t)r, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
-                paint(position, (int16_t)r, COLOR_SHOW_R, COLOR_SHOW_G, COLOR_SHOW_B);
-            }
             return;
 
         case PositionState::BLINKING:
@@ -701,7 +567,6 @@ void LedController::repaintPosition(uint8_t position) {
             break;
 
         case PositionState::ANIMATING:
-        case PositionState::CONTRACTING:
             // Drawn at the current step; the animation keeps going from there.
             rings = data.animationStep;
             break;
@@ -717,11 +582,6 @@ void LedController::repaintPosition(uint8_t position) {
 bool LedController::isAnimationComplete(uint8_t position) const {
     if (position >= activeBoardProfile().holdCount) return true;
     return m_positions[position].state != PositionState::ANIMATING;
-}
-
-bool LedController::isContractComplete(uint8_t position) const {
-    if (position >= activeBoardProfile().holdCount) return true;
-    return m_positions[position].state != PositionState::CONTRACTING;
 }
 
 bool LedController::isBlinking(uint8_t position) const {
@@ -867,18 +727,11 @@ void LedController::setCoreColor(uint8_t position, uint8_t r, uint8_t g, uint8_t
 void LedController::clearExpandedRegion(uint8_t position, const LedMapping* mapping) {
     if (!mapping) return;
     
-    // Clear based on whichever is larger: the tracked expansion radius or the animation radius
-    uint8_t clearRadius = m_positions[position].expansionRadius;
-    if (LED_SUCCESS_EXPANSION_RADIUS > clearRadius) {
-        clearRadius = LED_SUCCESS_EXPANSION_RADIUS;
-    }
-    
-    for (int16_t offset = -(int16_t)clearRadius; offset <= (int16_t)clearRadius; offset++) {
+    // The widest a block reaches: the core and every success ring
+    const int16_t clearRadius = (int16_t)LED_SUCCESS_EXPANSION_RADIUS;
+    for (int16_t offset = -clearRadius; offset <= clearRadius; offset++) {
         paint(position, offset, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
     }
-    
-    // Reset the expansion radius
-    m_positions[position].expansionRadius = 0;
 }
 
 void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
@@ -905,35 +758,6 @@ void LedController::updateAnimation(uint8_t position, uint32_t nowMillis) {
     for (uint8_t r = 1; r <= data.animationStep; r++) {
         paint(position, -(int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
         paint(position, (int16_t)r, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-    }
-    
-    m_needsUpdate = true;
-}
-
-void LedController::updateContractAnimation(uint8_t position, uint32_t nowMillis) {
-    PositionData& data = m_positions[position];
-    
-    if (nowMillis - data.lastAnimationTime < LED_ANIMATION_STEP_MS) return;
-    
-    const LedMapping* mapping = getMapping(position);
-    if (!mapping) return;
-    
-    data.lastAnimationTime = nowMillis;
-    
-    // Turn off the outermost LEDs at current radius
-    if (data.animationStep > 0) {
-        paint(position, -(int16_t)data.animationStep, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        paint(position, (int16_t)data.animationStep, COLOR_OFF_R, COLOR_OFF_G, COLOR_OFF_B);
-        data.animationStep--;
-    }
-    
-    // Keep center LED green
-    paint(position, 0, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
-    
-    // Check if contraction is complete
-    if (data.animationStep == 0) {
-        data.state = PositionState::SHOWN;
-        setCoreColor(position, COLOR_SUCCESS_R, COLOR_SUCCESS_G, COLOR_SUCCESS_B);
     }
     
     m_needsUpdate = true;
@@ -1045,24 +869,5 @@ void LedController::updateDefeatAnimation(uint32_t nowMillis) {
         m_strip2.setPixelColor(i, m_strip2.Color(brightness, 0, 0));
     }
     m_needsUpdate = true;
-}
-
-void LedController::updateMenuChangeAnimation(uint32_t nowMillis) {
-    if (nowMillis - m_menuChangeLastTime < LED_MENU_CHANGE_STEP_MS) return;
-    
-    m_menuChangeLastTime = nowMillis;
-    
-    // Expand by one LED on each step
-    if (m_menuChangeStep <= m_menuChangeRange) {
-        // Light up the current step index on both strips
-        m_strip1.setPixelColor(m_menuChangeStep, m_strip1.Color(m_menuChangeR, m_menuChangeG, m_menuChangeB));
-        m_strip2.setPixelColor(m_menuChangeStep, m_strip2.Color(m_menuChangeR, m_menuChangeG, m_menuChangeB));
-        m_needsUpdate = true;
-        
-        m_menuChangeStep++;
-    } else {
-        // Animation complete
-        m_menuChangeActive = false;
-    }
 }
 

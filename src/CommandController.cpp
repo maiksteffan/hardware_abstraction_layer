@@ -147,7 +147,6 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     cmd.r = 0;
     cmd.g = 0;
     cmd.b = 0;
-    cmd.range = 0;
     cmd.snakeStart = 0;
     cmd.snakeLength = 0;
     cmd.excludeMask.clear();
@@ -168,57 +167,6 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     }
     
     p = skipWhitespace(actionEnd);
-    
-    // Special parsing for MENUE_CHANGE: <r,g,b> <range>
-    if (cmd.action == CommandAction::MENUE_CHANGE) {
-        // Parse R value
-        uint16_t val = 0;
-        while (*p >= '0' && *p <= '9') {
-            val = val * 10 + (*p - '0');
-            p++;
-        }
-        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        cmd.r = (uint8_t)val;
-        
-        if (*p != ',') { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        p++;
-        
-        // Parse G value
-        val = 0;
-        while (*p >= '0' && *p <= '9') {
-            val = val * 10 + (*p - '0');
-            p++;
-        }
-        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        cmd.g = (uint8_t)val;
-        
-        if (*p != ',') { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        p++;
-        
-        // Parse B value
-        val = 0;
-        while (*p >= '0' && *p <= '9') {
-            val = val * 10 + (*p - '0');
-            p++;
-        }
-        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        cmd.b = (uint8_t)val;
-        
-        p = skipWhitespace(p);
-        
-        // Parse range
-        val = 0;
-        while (*p >= '0' && *p <= '9') {
-            val = val * 10 + (*p - '0');
-            p++;
-        }
-        if (val > 255) { m_eventQueue.queueError("bad_format", COMMAND_ID_NONE); return false; }
-        cmd.range = (uint8_t)val;
-        
-        p = skipWhitespace(p);
-        cmd.valid = true;
-        return true;
-    }
     
     if (cmd.action == CommandAction::SNAKE && !parseSnakeParams(p, cmd)) {
         m_eventQueue.queueError("bad_format", COMMAND_ID_NONE);
@@ -248,7 +196,7 @@ bool CommandController::parseLine(const char* line, ParsedCommand& cmd) {
     }
     
     // Parse exclusion list for EXPECT_ANY_EXCEPT: zero or more positions, then
-    // optional #id. An empty list is valid and makes this equivalent to EXPECT_ANY.
+    // optional #id. An empty list is valid and arms every hold.
     if (cmd.action == CommandAction::EXPECT_ANY_EXCEPT) {
         while (*p != '\0' && *p != '#') {
             const char* tokStart = p;
@@ -363,19 +311,14 @@ CommandAction CommandController::parseAction(const char* str, size_t len) {
     if (strcasecmpN(str, "HIDE", len)) return CommandAction::HIDE;
     if (strcasecmpN(str, "SUCCESS", len)) return CommandAction::SUCCESS;
     if (strcasecmpN(str, "FAIL", len)) return CommandAction::FAIL;
-    if (strcasecmpN(str, "CONTRACT", len)) return CommandAction::CONTRACT;
     if (strcasecmpN(str, "BLINK", len)) return CommandAction::BLINK;
     if (strcasecmpN(str, "STOP_BLINK", len)) return CommandAction::STOP_BLINK;
-    if (strcasecmpN(str, "EXPAND_STEP", len)) return CommandAction::EXPAND_STEP;
-    if (strcasecmpN(str, "CONTRACT_STEP", len)) return CommandAction::CONTRACT_STEP;
     if (strcasecmpN(str, "HOLD_GAUGE", len)) return CommandAction::HOLD_GAUGE;
     if (strcasecmpN(str, "SHOW_GAUGE", len)) return CommandAction::SHOW_GAUGE;
     if (strcasecmpN(str, "SHOW_BAR", len)) return CommandAction::SHOW_BAR;
     if (strcasecmpN(str, "HOLD_BAR", len)) return CommandAction::HOLD_BAR;
     if (strcasecmpN(str, "LED_OFFSET", len)) return CommandAction::LED_OFFSET;
-    if (strcasecmpN(str, "MENUE_CHANGE", len)) return CommandAction::MENUE_CHANGE;
     if (strcasecmpN(str, "EXPECT_ANY_EXCEPT", len)) return CommandAction::EXPECT_ANY_EXCEPT;
-    if (strcasecmpN(str, "EXPECT_ANY", len)) return CommandAction::EXPECT_ANY;
     if (strcasecmpN(str, "EXPECT", len)) return CommandAction::EXPECT;
     if (strcasecmpN(str, "EXPECT_RELEASE", len)) return CommandAction::EXPECT_RELEASE;
     if (strcasecmpN(str, "RECALIBRATE", len)) return CommandAction::RECALIBRATE;
@@ -407,19 +350,14 @@ const char* CommandController::actionToString(CommandAction action) {
         case CommandAction::HIDE_ALL: return "HIDE_ALL";
         case CommandAction::SUCCESS: return "SUCCESS";
         case CommandAction::FAIL: return "FAIL";
-        case CommandAction::CONTRACT: return "CONTRACT";
         case CommandAction::BLINK: return "BLINK";
         case CommandAction::STOP_BLINK: return "STOP_BLINK";
-        case CommandAction::EXPAND_STEP: return "EXPAND_STEP";
-        case CommandAction::CONTRACT_STEP: return "CONTRACT_STEP";
         case CommandAction::HOLD_GAUGE: return "HOLD_GAUGE";
         case CommandAction::SHOW_GAUGE: return "SHOW_GAUGE";
         case CommandAction::SHOW_BAR: return "SHOW_BAR";
         case CommandAction::HOLD_BAR: return "HOLD_BAR";
         case CommandAction::LED_OFFSET: return "LED_OFFSET";
-        case CommandAction::MENUE_CHANGE: return "MENUE_CHANGE";
         case CommandAction::EXPECT: return "EXPECT";
-        case CommandAction::EXPECT_ANY: return "EXPECT_ANY";
         case CommandAction::EXPECT_ANY_EXCEPT: return "EXPECT_ANY_EXCEPT";
         case CommandAction::EXPECT_RELEASE: return "EXPECT_RELEASE";
         case CommandAction::RECALIBRATE: return "RECALIBRATE";
@@ -451,11 +389,8 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
         case CommandAction::HIDE:
         case CommandAction::SUCCESS:
         case CommandAction::FAIL:
-        case CommandAction::CONTRACT:
         case CommandAction::BLINK:
         case CommandAction::STOP_BLINK:
-        case CommandAction::EXPAND_STEP:
-        case CommandAction::CONTRACT_STEP:
         case CommandAction::HOLD_GAUGE:
         case CommandAction::SHOW_GAUGE:
         case CommandAction::SHOW_BAR:
@@ -478,10 +413,8 @@ bool CommandController::actionRequiresPosition(CommandAction action) {
 bool CommandController::actionIsLongRunning(CommandAction action) {
     switch (action) {
         case CommandAction::SUCCESS:
-        case CommandAction::CONTRACT:
         case CommandAction::SEQUENCE_COMPLETED:
         case CommandAction::DEFEAT_ANIMATION:
-        case CommandAction::MENUE_CHANGE:
             return true;
         default:
             return false;
@@ -558,22 +491,6 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
             }
             break;
             
-        case CommandAction::EXPAND_STEP:
-            if (m_ledController.expandStep(cmd.positionIndex)) {
-                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
-            } else {
-                m_eventQueue.queueError("command_failed", cmdId);
-            }
-            break;
-            
-        case CommandAction::CONTRACT_STEP:
-            if (m_ledController.contractStep(cmd.positionIndex)) {
-                m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
-            } else {
-                m_eventQueue.queueError("command_failed", cmdId);
-            }
-            break;
-            
         case CommandAction::HOLD_GAUGE:
             if (m_ledController.holdGauge(cmd.positionIndex, cmd.extraValue)) {
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
@@ -623,15 +540,6 @@ void CommandController::executeInstant(const ParsedCommand& cmd) {
                 // published, and the Pi expects ACK -> TOUCHED ordering.
                 m_eventQueue.queueAck(actionStr, cmd.position, cmdId);
                 m_touchController->setExpectDown(cmd.positionIndex, cmdId);
-            } else {
-                m_eventQueue.queueError("no_touch_controller", cmdId);
-            }
-            break;
-            
-        case CommandAction::EXPECT_ANY:
-            if (m_touchController) {
-                m_touchController->setExpectAny(cmdId);
-                m_eventQueue.queueAck(actionStr, 0, cmdId);
             } else {
                 m_eventQueue.queueError("no_touch_controller", cmdId);
             }
@@ -866,14 +774,10 @@ bool CommandController::queueCommand(const ParsedCommand& cmd) {
             // Start the action
             if (cmd.action == CommandAction::SUCCESS) {
                 m_ledController.success(cmd.positionIndex);
-            } else if (cmd.action == CommandAction::CONTRACT) {
-                m_ledController.contract(cmd.positionIndex);
             } else if (cmd.action == CommandAction::SEQUENCE_COMPLETED) {
                 m_ledController.startSequenceCompletedAnimation();
             } else if (cmd.action == CommandAction::DEFEAT_ANIMATION) {
                 m_ledController.startDefeatAnimation();
-            } else if (cmd.action == CommandAction::MENUE_CHANGE) {
-                m_ledController.startMenuChangeAnimation(cmd.r, cmd.g, cmd.b, cmd.range);
             }
             
             return true;
@@ -896,14 +800,6 @@ void CommandController::tickCommand(QueuedCommand& qc) {
             }
             break;
             
-        case CommandAction::CONTRACT:
-            if (m_ledController.isContractComplete(qc.command.positionIndex)) {
-                m_eventQueue.queueDone(actionToString(qc.command.action), 
-                                       qc.command.position, cmdId);
-                qc.active = false;
-            }
-            break;
-            
         case CommandAction::SEQUENCE_COMPLETED:
             if (m_ledController.isSequenceCompletedAnimationComplete()) {
                 m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
@@ -913,13 +809,6 @@ void CommandController::tickCommand(QueuedCommand& qc) {
             
         case CommandAction::DEFEAT_ANIMATION:
             if (m_ledController.isDefeatAnimationComplete()) {
-                m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
-                qc.active = false;
-            }
-            break;
-            
-        case CommandAction::MENUE_CHANGE:
-            if (m_ledController.isMenuChangeAnimationComplete()) {
                 m_eventQueue.queueDone(actionToString(qc.command.action), 0, cmdId);
                 qc.active = false;
             }

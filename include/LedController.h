@@ -29,7 +29,6 @@ enum class PositionState : uint8_t {
     SHOWN,
     ANIMATING,
     EXPANDED,
-    CONTRACTING,
     BLINKING,
     GAUGE,
     BAR
@@ -40,7 +39,6 @@ struct PositionData {
     uint8_t animationStep;
     uint32_t lastAnimationTime;
     bool blinkOn;
-    uint8_t expansionRadius;  // Current expansion radius for EXPAND_STEP/CONTRACT_STEP
     // GAUGE only: how far out the block still reaches, in physical LEDs from
     // the center (0 = just the center LED). See holdGauge() / showGauge().
     uint8_t gaugeLevel;
@@ -48,8 +46,8 @@ struct PositionData {
     // The bar is drawn in the core color, like a gauge.
     uint16_t barPermille;
     // Core color of a SHOWN position. SHOWN covers more than SHOW: FAIL leaves
-    // a red core and a finished CONTRACT a green one, and repaintPosition()
-    // has to restore the right one after the snake passed over it.
+    // a red core, and repaintPosition() has to restore the right one after
+    // the snake passed over it.
     // For GAUGE it is the color of the whole block - green for HOLD_GAUGE,
     // the SHOW color for SHOW_GAUGE - and paintGauge() draws in it.
     uint8_t coreR, coreG, coreB;
@@ -72,11 +70,8 @@ public:
     void hideAll();
     bool success(uint8_t position);
     bool fail(uint8_t position);
-    bool contract(uint8_t position);
     bool blink(uint8_t position);
     bool stopBlink(uint8_t position);
-    bool expandStep(uint8_t position);
-    bool contractStep(uint8_t position);
     // Green block scaled to <percent> of its full width, as a progress gauge:
     // the Pi drives it down while a hold must stay gripped. Absolute, so a
     // lost command is corrected by the next one. 100 = the full SUCCESS block,
@@ -103,10 +98,6 @@ public:
     void startDefeatAnimation();
     bool isDefeatAnimationComplete() const;
     
-    // Menu change animation
-    void startMenuChangeAnimation(uint8_t r, uint8_t g, uint8_t b, uint8_t range);
-    bool isMenuChangeAnimationComplete() const;
-    
     // Recording indicator (static dim white on all positions; clear with hideAll())
     void indicateRecording();
     
@@ -127,7 +118,6 @@ public:
 
     // State queries
     bool isAnimationComplete(uint8_t position) const;
-    bool isContractComplete(uint8_t position) const;
     bool isBlinking(uint8_t position) const;
     
     // Low-level access (used by StartupController animation)
@@ -152,13 +142,6 @@ private:
     bool m_defeatAnimActive;
     uint16_t m_defeatAnimStep;
     uint32_t m_defeatAnimLastTime;
-    
-    // Menu change animation state
-    bool m_menuChangeActive;
-    uint8_t m_menuChangeStep;
-    uint8_t m_menuChangeRange;
-    uint8_t m_menuChangeR, m_menuChangeG, m_menuChangeB;
-    uint32_t m_menuChangeLastTime;
     
     // Snake overlay state, as a half-open track span [start, end)
     bool m_snakeActive;
@@ -216,11 +199,9 @@ private:
     void releaseTrackSpan(uint16_t start, uint16_t end);
     void paintSnake();
     void updateAnimation(uint8_t position, uint32_t nowMillis);
-    void updateContractAnimation(uint8_t position, uint32_t nowMillis);
     void updateBlinking(uint32_t nowMillis);
     void updateSequenceCompletedAnimation(uint32_t nowMillis);
     void updateDefeatAnimation(uint32_t nowMillis);
-    void updateMenuChangeAnimation(uint32_t nowMillis);
 };
 
 #endif // LED_CONTROLL
